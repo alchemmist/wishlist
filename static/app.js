@@ -48,11 +48,15 @@ function card(item){
 }
 async function load(){
   const me=await fetch('/api/me').then(r=>r.json());
-  const account=$('#account');
   if(me.user){
-    account.href='/'+me.user.username; account.textContent='';
-    if(me.user.avatar){const img=el('img');img.src=me.user.avatar;img.alt=me.user.username;img.width=28;img.height=28;account.append(img);}
-    else account.textContent=me.user.username;
+    const menu=el('div',undefined,'account-menu');
+    const logout=el('button','Log out','account-logout'); logout.type='button'; logout.hidden=true;
+    logout.onclick=async()=>{await fetch('/logout',{method:'POST'}); location.href='/login';};
+    const avatar=el('button',undefined,'account-avatar'); avatar.type='button'; avatar.setAttribute('aria-label',me.user.username); avatar.setAttribute('aria-expanded','false');
+    if(me.user.avatar){const img=el('img'); img.src=me.user.avatar; img.alt=''; avatar.append(img);}
+    else avatar.textContent=(me.user.username||'?').slice(0,1).toUpperCase();
+    avatar.onclick=()=>{logout.hidden=!logout.hidden; avatar.setAttribute('aria-expanded',String(!logout.hidden));};
+    menu.append(logout,avatar); $('#account-slot').replaceChildren(menu);
   }
   if(!username){$('#empty').hidden=false;$('#empty').textContent='Open a list at /username, or sign in.';return;}
   const response=await fetch('/api/wishlists/'+encodeURIComponent(username));
