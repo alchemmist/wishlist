@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Wishlist</title>
+<link rel="stylesheet" href="/static/style.css?v=app1">
+<script src="/static/app.js?v=app1" type="module"></script>
+</head>
+<body>
+<main>
+  <h1>Wishlist</h1>
+  <form id="composer" hidden>
+    <input name="title" placeholder="Title" required maxlength="120">
+    <input name="description" placeholder="Description" maxlength="400">
+    <input name="price" placeholder="Price" maxlength="40">
+    <input name="links" placeholder="Links, one per line">
+    <input name="image" type="file" accept="image/*">
+    <button type="submit">Add</button>
+    <p id="composer-error" role="alert"></p>
+  </form>
+  <p id="empty" hidden></p>
+  <section id="items" aria-label="Gifts"></section>
+</main>
+<div id="reserve" class="name-popover" role="dialog" aria-label="Reservation name" hidden>
+  <form id="reserve-form">
+    <label for="name" id="reservation-heading">Reserve gift</label>
+    <div class="name-entry">
+      <input id="name" name="name" placeholder="Name" maxlength="60" required autocomplete="off" aria-describedby="name-hint name-error">
+      <button type="submit" aria-label="Confirm">↵</button>
+    </div>
+    <p id="name-hint" class="hint"></p>
+    <p id="name-error" role="alert"></p>
+  </form>
+</div>
+<a class="account-link" id="account" href="/login">Sign in</a>
+</body>
+</html>
