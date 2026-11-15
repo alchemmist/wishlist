@@ -27,7 +27,9 @@ function card(item){
   const figure=el('div',null,'drawing');
   if(item.image){const img=el('img');img.className='product-photo';img.src=item.image;img.alt=item.title;figure.append(img);}
   const content=el('div',null,'gift-content');
-  content.append(el('h2',item.title));
+  const heading=el('div',undefined,'gift-heading'); heading.append(el('h2',item.title));
+  if(item.mine){const edit=el('button','Edit','edit-item'); edit.type='button'; edit.onclick=()=>startEdit(item); heading.append(edit);}
+  content.append(heading);
   if(item.description)content.append(el('p',item.description,'gift-description'));
   const links=el('div',null,'gift-links');
   for(const url of item.links){
@@ -87,13 +89,19 @@ document.addEventListener('pointerdown',event=>{if(!$('#reserve').hidden&&!$('#r
 $('#composer').onsubmit=async event=>{
   event.preventDefault(); const form=event.target; $('#composer-error').textContent='';
   const body={title:form.title.value,description:form.description.value,price:form.price.value,links:form.links.value.split(/\n+/).filter(Boolean)};
-  const response=await fetch('/api/wishlists/'+encodeURIComponent(username)+'/items',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)});
+  const editing=form.dataset.id;
+  const response=await fetch(editing?'/api/items/'+editing:'/api/wishlists/'+encodeURIComponent(username)+'/items',{method:editing?'PATCH':'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)});
   if(!response.ok){$('#composer-error').textContent='Could not add';return;}
   const item=await response.json();
   if(form.image.files[0]){
     const data=new FormData(); data.append('file',form.image.files[0]);
     await fetch('/api/items/'+item.id+'/image',{method:'POST',body:data});
   }
-  form.reset(); load();
+  form.reset(); delete form.dataset.id; form.querySelector('button').textContent='Add'; load();
 };
+function startEdit(item){
+  const form=$('#composer'); form.hidden=false; form.dataset.id=item.id;
+  form.title.value=item.title; form.description.value=item.description||''; form.price.value=item.price||''; form.links.value=(item.links||[]).join('\n');
+  form.querySelector('button').textContent='Save'; form.scrollIntoView({block:'start'});
+}
 load();

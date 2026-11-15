@@ -183,6 +183,24 @@ def add_item(username: str, body: ItemIn, request: Request):
     return item_json(row, True)
 
 
+@app.patch("/api/items/{item_id}")
+def edit_item(item_id: int, body: ItemIn, request: Request):
+    row = db.execute("SELECT items.*, users.username FROM items JOIN users ON users.id = items.owner_id WHERE items.id = ?", (item_id,)).fetchone()
+    if not row:
+        raise HTTPException(404, "Missing item")
+    require_owner(request, row["username"])
+    title = body.title.strip()
+    if not title:
+        raise HTTPException(400, "Title is required")
+    db.execute("UPDATE items SET title = ?, description = ?, price = ? WHERE id = ?", (title, body.description.strip(), body.price.strip(), item_id))
+    db.execute("DELETE FROM links WHERE item_id = ?", (item_id,))
+    for url in safe_links(body.links):
+        db.execute("INSERT INTO links(item_id, url) VALUES (?, ?)", (item_id, url))
+    db.commit()
+    updated = db.execute("SELECT * FROM items WHERE id = ?", (item_id,)).fetchone()
+    return item_json(updated, True)
+
+
 @app.post("/api/items/{item_id}/image")
 async def upload(item_id: int, request: Request, file: UploadFile = File(...)):
     row = db.execute("SELECT items.*, users.username FROM items JOIN users ON users.id = items.owner_id WHERE items.id = ?", (item_id,)).fetchone()
