@@ -108,9 +108,14 @@ $('#composer').onsubmit=async event=>{
   if(form.image.files[0]){
     const data=new FormData(); data.append('file',form.image.files[0]);
     const uploaded=await fetch('/api/items/'+item.id+'/image',{method:'POST',body:data});
-    if(!uploaded.ok){$('#composer-error').textContent='Photo was not saved';return;}
+    if(!uploaded.ok){$('#composer-error').textContent='Photo was not saved. Choose the file again.';return;}
   }
-  form.reset(); delete form.dataset.id; form.querySelector('button').textContent='Add'; load();
+  form.reset(); delete form.dataset.id; $('#photo-preview').hidden=true; $('#photo-preview').removeAttribute('src'); form.querySelector('button').textContent='Add'; load();
+};
+$('#composer').image.onchange=()=>{
+  const file=$('#composer').image.files[0]; const preview=$('#photo-preview');
+  if(!file){preview.hidden=true; preview.removeAttribute('src'); return;}
+  preview.src=URL.createObjectURL(file); preview.hidden=false;
 };
 function startEdit(item){
   const form=$('#composer'); form.hidden=false; form.dataset.id=item.id;
