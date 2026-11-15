@@ -27,8 +27,8 @@ function card(item){
   const figure=el('div',null,'drawing');
   if(item.image){const img=el('img');img.className='product-photo';img.src=item.image;img.alt=item.title;figure.append(img);}
   const content=el('div',null,'gift-content');
-  const heading=el('div',undefined,'gift-heading'); heading.append(el('h2',item.title));
-  if(item.mine){const edit=el('button','Edit','edit-item'); edit.type='button'; edit.onclick=()=>startEdit(item); heading.append(edit);}
+  const heading=el('h2',item.title);
+  if(item.mine){const edit=el('button',undefined,'edit-item'); edit.type='button'; edit.setAttribute('aria-label','Edit '+item.title); edit.innerHTML='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20h4l10-10-4-4L4 16z"/><path d="m12.5 6.5 4 4"/></svg>'; edit.onclick=()=>startEdit(item); heading.append(edit);}
   content.append(heading);
   if(item.description)content.append(el('p',item.description,'gift-description'));
   const links=el('div',null,'gift-links');
