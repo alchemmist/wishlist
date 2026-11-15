@@ -1,6 +1,6 @@
 # Wishlist
 
-Public wishlists on https://wishlist.alchemmist.xyz.
+Public wishlists on https://wishlist.alchemmist.xyz. How the pieces fit together is in [OVERVIEW.md](OVERVIEW.md).
 
 A signed-in person has one list at `/{username}`. The username comes from Authentik. Anyone can open that page and reserve a gift with a name. Names are unique: the same spelling, ignoring case, is one person. Releasing a gift requires that same name.
 
