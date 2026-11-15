@@ -75,8 +75,20 @@ function openReservation(item,toggle){
   current={item,toggle}; $('#reserve-form').reset(); $('#name-error').textContent='';
   $('#reservation-heading').textContent=item.reserved?'Release gift':'Reserve gift';
   $('#name-hint').textContent=item.reserved?'Use the same name.':'Names are unique. Use a name that is yours.';
-  $('#reserve').hidden=false; $('#name').focus();
+  $('#reserve').hidden=false; placeReserve(); $('#name').focus();
 }
+function placeReserve(){
+  const pop=$('#reserve'); if(pop.hidden||!current?.toggle)return;
+  const box=current.toggle.getBoundingClientRect();
+  const width=pop.offsetWidth, height=pop.offsetHeight;
+  const left=Math.max(12,Math.min(innerWidth-width-12, box.left+box.width/2-width/2));
+  const above=box.top-height-12>=12;
+  pop.style.left=left+'px';
+  pop.style.top=(above?box.top-height-12:box.bottom+12)+'px';
+  pop.classList.toggle('below',!above);
+  pop.style.setProperty('--arrow-left', Math.max(14, Math.min(width-14, box.left+box.width/2-left))+'px');
+}
+addEventListener('resize',placeReserve); addEventListener('scroll',placeReserve,true);
 $('#reserve-form').onsubmit=async event=>{
   event.preventDefault();
   const name=$('#name').value.trim();
