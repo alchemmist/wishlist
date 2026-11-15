@@ -2,3 +2,9 @@
 data/
 __pycache__/
 .pytest_cache/
+
+node_modules/
+playwright-report/
+test-results/
+.playwright-mcp/
+reports/

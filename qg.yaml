@@ -1,0 +1,205 @@
+# Source of truth: generate/validate workflows with quality-graph 0.2.0.
+# The supported declaration filename is qg.yaml (not qg.yml).
+version: 0
+provider:
+  name: github
+  configuration:
+    default-branch: main
+    merge:
+      required: true
+    runtime:
+      action: alchemmist/quality-graph@3b0cf7d8a33215d5a3bb5521b4e0e41c18e8cb7c
+      publisher-action: alchemmist/quality-graph@3b0cf7d8a33215d5a3bb5521b4e0e41c18e8cb7c
+      upload-artifact-action: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+
+profiles:
+  default:
+    runner: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    setup:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: "false"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: requirements*.txt
+      - name: Install pinned Quality Graph toolchain
+        run: python -m pip install -r requirements-quality.txt
+  workflow:
+    extends: default
+    setup:
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+          cache: "false"
+  python:
+    extends: default
+    setup:
+      - name: Install application and test dependencies
+        run: python -m pip install -r requirements-dev.txt
+  node:
+    extends: default
+    setup:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+  frontend:
+    extends: node
+    setup:
+      - run: npm ci
+  browser:
+    extends: python
+    timeout-minutes: 20
+    env:
+      CI: "true"
+      PYTHON: python
+    setup:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+      - run: npm ci
+  chromium:
+    extends: browser
+    setup:
+      - run: npx playwright install --with-deps chromium
+  firefox:
+    extends: browser
+    setup:
+      - run: npx playwright install --with-deps firefox
+  webkit:
+    extends: browser
+    setup:
+      - run: npx playwright install --with-deps webkit
+
+nodes:
+  graph:
+    title: Quality Graph declaration and generated files
+    run: qg validate
+  workflow-syntax:
+    title: GitHub workflow syntax and expressions
+    profile: workflow
+    needs: [graph]
+    run: go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.11 -shellcheck= -pyflakes=
+  python-syntax:
+    title: Python syntax
+    needs: [graph]
+    run: python -m compileall -q app tests
+  javascript-syntax:
+    title: JavaScript syntax
+    profile: node
+    needs: [graph]
+    shell: bash
+    run: |
+      set -euo pipefail
+      find static tests/e2e -name '*.js' -print0 | while IFS= read -r -d '' file; do
+        node --input-type=module --check < "$file"
+      done
+      node --check playwright.config.js
+  unit:
+    title: API, concurrency, migrations and storage tests
+    profile: python
+    needs: [python-syntax, workflow-syntax]
+    run: python -m pytest -q --junitxml=reports/pytest.xml -o junit_family=xunit1
+    results:
+      junit: reports/pytest.xml
+    policy:
+      approvals:
+        findings: false
+  python-audit:
+    title: Python application and CI dependency audit
+    profile: python
+    needs: [graph]
+    shell: bash
+    run: |
+      set -euo pipefail
+      mkdir -p reports
+      python -m pip_audit -r requirements-dev.txt 2>&1 | tee reports/python-audit.log
+    results:
+      exit-code: reports/python-audit.log
+  npm-audit:
+    title: npm dependency audit
+    profile: frontend
+    needs: [graph]
+    shell: bash
+    run: |
+      set -euo pipefail
+      mkdir -p reports
+      npm audit --audit-level=low 2>&1 | tee reports/npm-audit.log
+    results:
+      exit-code: reports/npm-audit.log
+  e2e-desktop-chromium:
+    title: E2E desktop Chromium
+    profile: chromium
+    needs: [unit, javascript-syntax]
+    env:
+      PLAYWRIGHT_PROJECT: desktop-chromium
+    # Record the test status, upload evidence, then fail the job if tests failed.
+    # QG collects job.status for multi-step nodes; a red test cannot become green.
+    steps: &playwright-steps
+      - name: Run browser tests and record exit status
+        shell: bash
+        run: |
+          mkdir -p reports/playwright
+          status=0
+          npm run test:e2e -- --project="$PLAYWRIGHT_PROJECT" || status=$?
+          printf '%s\n' "$status" > reports/playwright/exit-code
+      - name: Upload Playwright evidence
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: playwright-${{ env.PLAYWRIGHT_PROJECT }}-${{ github.run_attempt }}
+          path: |
+            reports/playwright/
+            playwright-report/
+            test-results/
+          if-no-files-found: error
+          retention-days: "7"
+      - name: Enforce browser test exit status
+        shell: bash
+        run: exit "$(cat reports/playwright/exit-code)"
+    results:
+      junit: reports/playwright/junit.xml
+    policy:
+      approvals:
+        findings: false
+  e2e-desktop-firefox:
+    title: E2E desktop Firefox
+    profile: firefox
+    needs: [unit, javascript-syntax]
+    env:
+      PLAYWRIGHT_PROJECT: desktop-firefox
+    steps: *playwright-steps
+    results:
+      junit: reports/playwright/junit.xml
+    policy:
+      approvals:
+        findings: false
+  e2e-mobile-chromium:
+    title: E2E mobile Chromium (Pixel 7)
+    profile: chromium
+    needs: [unit, javascript-syntax]
+    env:
+      PLAYWRIGHT_PROJECT: mobile-chromium
+    steps: *playwright-steps
+    results:
+      junit: reports/playwright/junit.xml
+    policy:
+      approvals:
+        findings: false
+  e2e-mobile-webkit:
+    title: E2E mobile WebKit (iPhone 13)
+    profile: webkit
+    needs: [unit, javascript-syntax]
+    env:
+      PLAYWRIGHT_PROJECT: mobile-webkit
+    steps: *playwright-steps
+    results:
+      junit: reports/playwright/junit.xml
+    policy:
+      approvals:
+        findings: false

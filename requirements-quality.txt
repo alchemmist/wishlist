@@ -1,0 +1,3 @@
+# Keep CLI and GitHub provider on the same release as qg.yaml runtime pins.
+quality-graph-cli==0.2.0
+quality-graph-github==0.2.0

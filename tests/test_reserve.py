@@ -1,10 +1,3 @@
-import os
-import tempfile
-
-os.environ["DATA_DIR"] = tempfile.mkdtemp()
-os.environ["SESSION_SECRET"] = "test"
-os.environ["PUBLIC_URL"] = "http://localhost"
-
 from fastapi.testclient import TestClient
 
 from app.main import app, db
