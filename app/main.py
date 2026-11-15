@@ -17,7 +17,6 @@ ISSUER = os.environ.get("OIDC_ISSUER", "").rstrip("/")
 CLIENT_ID = os.environ.get("OIDC_CLIENT_ID", "")
 CLIENT_SECRET = os.environ.get("OIDC_CLIENT_SECRET", "")
 PUBLIC_URL = os.environ.get("PUBLIC_URL", "https://wishlist.alchemmist.xyz").rstrip("/")
-REQUIRED_GROUP = os.environ.get("AUTH_REQUIRED_GROUP", "app-wishlist-user")
 
 app = FastAPI()
 db = connect(DATA / "wishlist.sqlite")
@@ -132,9 +131,6 @@ async def callback(request: Request, code: str = "", state: str = ""):
             "client_secret": CLIENT_SECRET,
         })).json()
         info = (await client.get(metadata["userinfo_endpoint"], headers={"Authorization": f"Bearer {token['access_token']}"})).json()
-    groups = info.get("groups") or []
-    if REQUIRED_GROUP and REQUIRED_GROUP not in groups:
-        raise HTTPException(403, "This account is not in the wishlist group")
     username = (info.get("preferred_username") or info.get("nickname") or "").strip()
     if not username:
         raise HTTPException(400, "Authentik did not return a username")
