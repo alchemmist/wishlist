@@ -81,8 +81,18 @@ body[data-hc-zoom-active] .medium-zoom-overlay{z-index:1000}
 .photo-tile:active{cursor:grabbing}
 .photo-remove svg{width:16px;height:16px;pointer-events:none}
 .photo-tile:focus-visible{outline:2px solid #2459bd;outline-offset:3px}
-.photo-gallery{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:4px;min-width:0}
-.photo-gallery .product-photo{width:100%;height:45px;min-width:0}
-.photo-gallery .product-photo:first-child{grid-column:1/-1;height:160px}
-@media(max-width:600px){.photo-gallery .product-photo:first-child{height:112px}.photo-gallery .product-photo{height:30px}}
-@media(max-width:480px){.photo-gallery .product-photo:first-child{height:90px}.photo-gallery .product-photo{height:25px}}
+
+/* One full-height marketplace photo; pointer zones select story segments. */
+.drawing{align-self:stretch;min-height:160px;border-radius:4px;overflow:hidden;touch-action:pan-y}
+.drawing .product-photo{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
+.photo-story-bars{position:absolute;top:7px;left:7px;right:7px;display:flex;gap:3px;pointer-events:none;opacity:0;transition:opacity .12s}
+.photo-story:hover .photo-story-bars,.photo-story:focus-within .photo-story-bars{opacity:1}
+.photo-story-bars span{flex:1;min-width:0;height:3px;border-radius:2px;background:#ffffff70;box-shadow:0 1px 2px #0003}
+.photo-story-bars span.active{background:#fff}
+.delete-item{display:inline-flex;align-items:center;justify-content:center;flex:none;width:28px;height:28px;margin:0;padding:0;border:0;border-radius:4px;color:#777}
+.delete-item svg{width:16px;height:16px}
+.delete-item:hover{color:#a22;background:#fff0f0}
+@media(max-width:600px){.drawing{min-height:112px}}
+@media(max-width:480px){.drawing{grid-row:1 / span 2;min-height:96px}}
+@media(hover:none){.photo-story-bars{opacity:1}}
+@media(prefers-reduced-motion:reduce){.photo-story-bars{transition:none}}

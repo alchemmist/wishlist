@@ -85,3 +85,11 @@ hover/focus (tap to focus on touch devices). Delete individual photos, then Save
 editor changes. Existing single-photo gifts migrate automatically without
 copying image objects. Upload retries reuse photo IDs and preserve completed
 uploads, including when an upload response was lost.
+
+
+Saved cards show one full-row-height photo, not a large cover plus thumbnails.
+On hover, story segments appear across the top: moving the pointer horizontally
+selects the corresponding photo without clicking. Touch swipes and focused-photo
+Left/Right keys cycle through photos; clicking/Enter still zooms the selected
+photo. Owners can delete a gift directly with the trash icon next to its pencil
+(confirmation required).

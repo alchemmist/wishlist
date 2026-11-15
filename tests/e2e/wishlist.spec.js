@@ -361,7 +361,8 @@ test('multiple photos: append selections, drag order, individual remove, save/re
   await page.getByRole('button', {name: 'Remove photo 3', exact: true}).click();
   await expect(page.locator('.photo-tile')).toHaveCount(2);
   await page.getByRole('button', {name: 'Add', exact: true}).click();
-  await expect(page.locator('.gift .product-photo')).toHaveCount(2);
+  await expect(page.locator('.gift .product-photo')).toHaveCount(1);
+  await expect(page.locator('.gift .photo-story-bars span')).toHaveCount(2);
   const user = (await (await page.request.get('/api/me')).json()).user.username;
   let item = (await (await page.request.get('/api/wishlists/' + user)).json()).items[0];
   expect(item.photos.map(photo => photo.id)).toEqual(order.slice(0, 2));
@@ -378,7 +379,8 @@ test('multiple photos: append selections, drag order, individual remove, save/re
   await page.locator('.photo-tile').first().hover();
   await page.getByRole('button', {name: 'Remove photo 1', exact: true}).click();
   await page.getByRole('button', {name: 'Cancel', exact: true}).click();
-  await expect(page.locator('.gift .product-photo')).toHaveCount(2);
+  await expect(page.locator('.gift .product-photo')).toHaveCount(1);
+  await expect(page.locator('.gift .photo-story-bars span')).toHaveCount(2);
   await page.getByRole('button', {name: 'Edit Gallery gift', exact: true}).click();
   await page.locator('.photo-tile').first().hover();
   await page.getByRole('button', {name: 'Remove photo 1', exact: true}).click();
@@ -409,9 +411,74 @@ test('partial multi-photo upload with a lost response retries without duplicates
   const before = (await (await page.request.get('/api/wishlists/' + user)).json()).items[0];
   expect(before.photos).toHaveLength(2);
   await page.getByRole('button', {name: 'Save', exact: true}).click();
-  await expect(page.locator('.gift .product-photo')).toHaveCount(2);
+  await expect(page.locator('.gift .product-photo')).toHaveCount(1);
+  await expect(page.locator('.gift .photo-story-bars span')).toHaveCount(2);
   expect(attempts).toBe(2);
   const after = (await (await page.request.get('/api/wishlists/' + user)).json()).items;
   expect(after).toHaveLength(1);
   expect(after[0].photos).toEqual(before.photos);
+});
+
+test('marketplace photo stories fill the row, track hover zones, loop and zoom the selected photo', async ({page}) => {
+  const username = await signIn(page);
+  await page.getByRole('textbox', {name: 'Title', exact: true}).fill('Photo stories');
+  await page.getByRole('textbox', {name: 'Description', exact: true}).fill('A long description\n'.repeat(15));
+  await page.getByLabel('Photo', {exact: true}).setInputFiles([photo, {...photo, name: 'second.webp'}, {...photo, name: 'third.webp'}]);
+  await page.getByRole('button', {name: 'Add', exact: true}).click();
+  const drawing = page.locator('.gift .drawing');
+  const image = drawing.locator('.product-photo');
+  await expect(image).toBeVisible();
+  await expect(drawing.locator('.product-photo')).toHaveCount(1);
+  await expect(drawing.locator('.photo-story-bars span')).toHaveCount(3);
+  const dimensions = await page.locator('.gift').evaluate(gift => ({
+    drawing: gift.querySelector('.drawing').getBoundingClientRect().height,
+    image: gift.querySelector('.product-photo').getBoundingClientRect().height,
+    content: gift.querySelector('.gift-content').getBoundingClientRect().height,
+    overflow: document.documentElement.scrollWidth > innerWidth,
+  }));
+  expect(dimensions.drawing).toBeGreaterThanOrEqual(dimensions.content - 1);
+  expect(dimensions.image).toBeCloseTo(dimensions.drawing, 0);
+  expect(dimensions.overflow).toBe(false);
+  const photos = (await (await page.request.get('/api/wishlists/' + username)).json()).items[0].photos;
+  const box = await drawing.boundingBox();
+  for (const [index, fraction] of [[0, .1], [1, .5], [2, .9], [0, .1]]) {
+    await page.mouse.move(box.x + box.width * fraction, box.y + 25);
+    await expect(drawing).toHaveAttribute('data-photo-index', String(index));
+    await expect(image).toHaveAttribute('src', photos[index].url);
+    await expect(drawing.locator('.photo-story-bars .active')).toHaveCount(1);
+    await expect(drawing.locator('.photo-story-bars')).toHaveCSS('opacity', '1');
+  }
+  await image.focus(); await image.press('ArrowLeft');
+  await expect(drawing).toHaveAttribute('data-photo-index', '2');
+  await image.press('ArrowRight');
+  await expect(drawing).toHaveAttribute('data-photo-index', '0');
+  await drawing.dispatchEvent('pointerdown', {pointerType: 'touch', clientX: box.x + box.width - 2});
+  await drawing.dispatchEvent('pointerup', {pointerType: 'touch', clientX: box.x + 2});
+  await expect(drawing).toHaveAttribute('data-photo-index', '1');
+  await image.press('Enter');
+  await expect(page.locator('body')).toHaveAttribute('data-hc-zoom-active', '');
+  await expect(page.locator('.medium-zoom-image--opened')).toHaveAttribute('src', photos[1].url);
+  await page.keyboard.press('Escape');
+  await expect(page.locator('body')).not.toHaveAttribute('data-hc-zoom-active');
+});
+
+test('owner deletes directly next to the pencil; guests cannot; cancellation and network retry are safe', async ({page, browser}) => {
+  const username = await signIn(page); await addGift(page, 'Delete directly');
+  const titleRow = page.locator('.gift-title');
+  await expect(titleRow.getByRole('button', {name: 'Edit Delete directly', exact: true})).toBeVisible();
+  const remove = titleRow.getByRole('button', {name: 'Delete Delete directly', exact: true});
+  await expect(remove).toBeVisible();
+  const guestContext = await browser.newContext(); const guest = await guestContext.newPage();
+  await guest.goto('/' + username);
+  await expect(guest.locator('.gift-title button')).toHaveCount(0);
+  await guestContext.close();
+  page.once('dialog', dialog => dialog.dismiss()); await remove.click();
+  await expect(page.locator('.gift')).toHaveCount(1);
+  await page.route('**/api/items/*', route => route.request().method() === 'DELETE' ? route.abort('failed') : route.continue(), {times: 1});
+  page.once('dialog', dialog => dialog.accept()); await remove.click();
+  await expect(page.locator('#notice')).toContainText('Could not delete');
+  await expect(page.locator('.gift')).toHaveCount(1);
+  page.once('dialog', dialog => dialog.accept()); await remove.click();
+  await expect(page.locator('.gift')).toHaveCount(0);
+  await page.reload(); await expect(page.locator('.gift')).toHaveCount(0);
 });

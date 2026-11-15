@@ -49,6 +49,9 @@ function ensureZoom() {
     image.setAttribute('role', 'button');
     image.setAttribute('aria-label', 'Enlarge photo: ' + image.alt);
     image.onkeydown = event => {
+      if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
+        event.preventDefault(); image.parentElement.dispatchEvent(new CustomEvent('gallery-step', {detail: event.key === 'ArrowLeft' ? -1 : 1}));
+      }
       if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); zoom.open(image); }
     };
   }
@@ -60,14 +63,44 @@ function card(item) {
   const figure = el('div', null, 'drawing');
   const photos = item.photos?.length ? item.photos : item.image ? [{url: item.image}] : [];
   if (photos.length) {
-    photos.forEach((photo, index) => {
-      const image = el('img', null, 'product-photo');
-      image.src = photo.url; image.alt = index ? item.title + ' — photo ' + (index + 1) : item.title;
-      image.loading = 'lazy'; image.draggable = false;
-      image.onerror = () => { image.hidden = true; };
-      figure.append(image);
-    });
-    if (photos.length > 1) figure.classList.add('photo-gallery');
+    const image = el('img', null, 'product-photo');
+    image.src = photos[0].url; image.alt = item.title;
+    image.loading = 'lazy'; image.draggable = false;
+    image.onerror = () => { image.hidden = true; };
+    figure.append(image);
+    if (photos.length > 1) {
+      figure.classList.add('photo-story');
+      const indicators = el('div', null, 'photo-story-bars');
+      indicators.setAttribute('aria-hidden', 'true');
+      for (let index = 0; index < photos.length; index++) indicators.append(el('span'));
+      let active = -1, touchStart = null, swiped = false;
+      const show = index => {
+        if (zoomOpening || document.body.hasAttribute('data-hc-zoom-active')) return;
+        const next = (index + photos.length) % photos.length;
+        if (active === next) return;
+        active = next;
+        image.src = photos[active].url; image.hidden = false;
+        image.alt = active ? item.title + ' — photo ' + (active + 1) : item.title;
+        image.setAttribute('aria-label', 'Enlarge photo: ' + image.alt);
+        figure.dataset.photoIndex = active;
+        [...indicators.children].forEach((bar, index) => bar.classList.toggle('active', index === active));
+      };
+      figure.onpointermove = event => {
+        if (event.pointerType !== 'mouse') return;
+        const box = figure.getBoundingClientRect();
+        show(Math.max(0, Math.min(photos.length - 1, Math.floor((event.clientX - box.left) / box.width * photos.length))));
+      };
+      figure.onpointerdown = event => { if (event.pointerType !== 'mouse') { touchStart = event.clientX; swiped = false; } };
+      figure.onpointerup = event => {
+        if (touchStart === null) return;
+        const distance = event.clientX - touchStart; touchStart = null;
+        if (Math.abs(distance) > 25) { swiped = true; show(active + (distance < 0 ? 1 : -1)); }
+      };
+      figure.onpointercancel = () => { touchStart = null; };
+      figure.addEventListener('click', event => { if (swiped) { event.preventDefault(); event.stopPropagation(); swiped = false; } }, true);
+      figure.addEventListener('gallery-step', event => show(active + event.detail));
+      figure.append(indicators); show(0);
+    }
   } else node.classList.add('no-photo');
   const content = el('div', null, 'gift-content');
   const heading = el('h2', item.title);
@@ -77,7 +110,11 @@ function card(item) {
     edit.type = 'button'; edit.setAttribute('aria-label', 'Edit ' + item.title);
     edit.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20h4l10-10-4-4L4 16z"/><path d="m12.5 6.5 4 4"/></svg>';
     edit.onclick = () => { if (!composerBusy) startEdit(item); };
-    titleRow.append(edit);
+    const remove = el('button', null, 'delete-item');
+    remove.type = 'button'; remove.setAttribute('aria-label', 'Delete ' + item.title);
+    remove.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18M9 6V3h6v3M5 6l1 15h12l1-15M10 10v7M14 10v7"/></svg>';
+    remove.onclick = () => deleteGift(item.id);
+    titleRow.append(edit, remove);
   }
   content.append(titleRow);
   if (item.price) content.append(el('p', item.price, 'gift-price'));
@@ -359,16 +396,18 @@ form.onsubmit = async event => {
   } catch (error) { $('#composer-error').textContent = error instanceof TypeError ? 'Connection failed. Your form is kept; please try again.' : error.message; }
   finally { setComposerBusy(false); }
 };
-$('#delete-item').onclick = async () => {
-  if (composerBusy || !form.dataset.id || !confirm('Delete this gift? Its reservation will also be removed.')) return;
+async function deleteGift(id) {
+  if (composerBusy || !id || !confirm('Delete this gift? Its reservation will also be removed.')) return;
   setComposerBusy(true);
   try {
-    const response = await fetch('/api/items/' + form.dataset.id, {method: 'DELETE'});
+    const response = await fetch('/api/items/' + id, {method: 'DELETE'});
     if (!response.ok) throw new Error();
-    resetComposer(); showNotice('Gift deleted.'); await load();
-  } catch { $('#composer-error').textContent = 'Could not delete the gift. Please try again.'; }
+    if (String(form.dataset.id) === String(id)) resetComposer();
+    showNotice('Gift deleted.'); await load();
+  } catch { showNotice('Could not delete the gift. Please try again.'); }
   finally { setComposerBusy(false); }
-};
+}
+$('#delete-item').onclick = () => deleteGift(form.dataset.id);
 field('image').onchange = () => {
   const files = [...field('image').files]; field('image').value = '';
   if (composerPhotos.length + files.length > 20) { $('#composer-error').textContent = 'Use no more than 20 photos.'; return; }
