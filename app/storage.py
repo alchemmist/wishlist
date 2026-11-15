@@ -25,7 +25,7 @@ class Store:
                 pass
 
     def put(self, username: str, data: bytes, content_type: str) -> str:
-        suffix = ".webp" if "webp" in content_type else ".bin"
+        suffix, content_type = _image_type(content_type)
         key = f"{username}/{uuid.uuid4().hex}{suffix}"
         if self.client:
             self.client.put_object(Bucket=self.bucket, Key=key, Body=data, ContentType=content_type)
@@ -50,3 +50,20 @@ class Store:
                 return None
         path = self.data_dir / "media" / key
         return path.read_bytes() if path.is_file() else None
+
+    def content_type(self, key: str) -> str:
+        suffix = Path(key).suffix.lower()
+        return next((value for ext, value in _TYPES.values() if ext == suffix), "application/octet-stream")
+
+
+_TYPES = {
+    "image/jpeg": (".jpg", "image/jpeg"),
+    "image/jpg": (".jpg", "image/jpeg"),
+    "image/png": (".png", "image/png"),
+    "image/webp": (".webp", "image/webp"),
+    "image/gif": (".gif", "image/gif"),
+}
+
+
+def _image_type(content_type: str) -> tuple[str, str]:
+    return _TYPES.get((content_type or "").split(";", 1)[0].strip().lower(), (".bin", "application/octet-stream"))

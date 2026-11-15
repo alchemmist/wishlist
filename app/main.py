@@ -253,7 +253,7 @@ def media(key: str):
     data = store.read(key)
     if data is None:
         raise HTTPException(404)
-    return Response(data, media_type="image/webp")
+    return Response(data, media_type=store.content_type(key))
 
 
 @app.get("/")

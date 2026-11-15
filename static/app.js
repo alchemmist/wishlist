@@ -107,7 +107,8 @@ $('#composer').onsubmit=async event=>{
   const item=await response.json();
   if(form.image.files[0]){
     const data=new FormData(); data.append('file',form.image.files[0]);
-    await fetch('/api/items/'+item.id+'/image',{method:'POST',body:data});
+    const uploaded=await fetch('/api/items/'+item.id+'/image',{method:'POST',body:data});
+    if(!uploaded.ok){$('#composer-error').textContent='Photo was not saved';return;}
   }
   form.reset(); delete form.dataset.id; form.querySelector('button').textContent='Add'; load();
 };
