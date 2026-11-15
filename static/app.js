@@ -264,38 +264,35 @@ function movePhoto(id, targetId) {
 function renderPhotos() {
   $('#photo-previews').replaceChildren(...composerPhotos.map((photo, index) => {
     const tile = el('div', null, 'photo-tile'); tile.dataset.photoId = photo.id;
-    tile.setAttribute('role', 'listitem'); tile.draggable = !composerBusy;
+    tile.setAttribute('role', 'listitem'); tile.draggable = !composerBusy; tile.tabIndex = 0;
+    tile.setAttribute('aria-label', 'Photo ' + (index + 1));
+    tile.onpointerdown = event => {
+      if (composerBusy || event.target.closest('button') || event.pointerType === 'mouse') return;
+      tile.focus({preventScroll: true}); draggedPhoto = photo.id;
+      $('#photo-previews').setPointerCapture(event.pointerId);
+    };
+    tile.onkeydown = event => {
+      if (event.target !== tile || !['ArrowLeft', 'ArrowRight'].includes(event.key)) return;
+      event.preventDefault();
+      movePhoto(photo.id, composerPhotos[index + (event.key === 'ArrowLeft' ? -1 : 1)]?.id);
+      $('#photo-previews [data-photo-id="' + photo.id + '"]')?.focus();
+    };
     const image = el('img'); image.src = photo.url; image.alt = 'Photo ' + (index + 1); image.draggable = false;
     if (!index) image.id = 'photo-preview';
-    const remove = el('button', '×', 'photo-remove'); remove.type = 'button';
+    const remove = el('button', null, 'photo-remove');
+    remove.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M9 6V3h6v3M5 6l1 15h12l1-15M10 10v7M14 10v7"/></svg>'; remove.type = 'button';
     remove.setAttribute('aria-label', 'Remove photo ' + (index + 1));
     remove.onclick = () => {
       if (composerBusy) return;
       if (photo.file) URL.revokeObjectURL(photo.url);
       composerPhotos = composerPhotos.filter(value => value !== photo); renderPhotos();
     };
-    const handle = el('button', '⠿', 'photo-handle'); handle.type = 'button';
-    handle.setAttribute('aria-label', 'Drag photo ' + (index + 1));
-    handle.onpointerdown = event => {
-      if (composerBusy || event.button !== 0) return;
-      event.preventDefault(); draggedPhoto = photo.id;
-      $('#photo-previews').setPointerCapture(event.pointerId);
-    };
-    const controls = el('div', null, 'photo-moves');
-    for (const [offset, text] of [[-1, '←'], [1, '→']]) {
-      const button = el('button', text); button.type = 'button';
-      button.setAttribute('aria-label', 'Move photo ' + (index + 1) + (offset < 0 ? ' left' : ' right'));
-      button.disabled = !composerPhotos[index + offset];
-      button.onclick = () => { movePhoto(photo.id, composerPhotos[index + offset]?.id); $('#photo-previews [data-photo-id="' + photo.id + '"] .photo-handle')?.focus(); };
-      controls.append(button);
-    }
     tile.ondragstart = event => { if (composerBusy) { event.preventDefault(); return; } draggedPhoto = photo.id; event.dataTransfer.setData('text/plain', photo.id); event.dataTransfer.effectAllowed = 'move'; };
     tile.ondragover = event => event.preventDefault();
     tile.ondrop = event => { event.preventDefault(); movePhoto(event.dataTransfer.getData('text/plain'), photo.id); draggedPhoto = null; };
     tile.ondragend = () => { draggedPhoto = null; };
-    tile.append(image, remove, handle, controls); return tile;
+    tile.append(image, remove); return tile;
   }));
-  $('#remove-photo').hidden = !composerPhotos.length;
 }
 $('#photo-previews').onpointermove = event => {
   if (!draggedPhoto || composerBusy) return;
@@ -307,7 +304,7 @@ function resetComposer() {
   composerRequestId = null;
   form.reset(); delete form.dataset.id;
   clearPreview(); form.querySelector('[type=submit]').textContent = 'Add';
-  for (const id of ['cancel-edit', 'delete-item', 'remove-photo']) $('#' + id).hidden = true;
+  for (const id of ['cancel-edit', 'delete-item']) $('#' + id).hidden = true;
   $('#composer-error').textContent = '';
 }
 function setComposerBusy(busy) {
@@ -318,9 +315,6 @@ function setComposerBusy(busy) {
 $('#cancel-edit').onclick = async () => {
   if (composerBusy) return;
   resetComposer(); await load();
-};
-$('#remove-photo').onclick = () => {
-  field('image').value = ''; clearPreview();
 };
 form.onsubmit = async event => {
   event.preventDefault(); if (composerBusy) return;

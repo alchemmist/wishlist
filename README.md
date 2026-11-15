@@ -78,10 +78,10 @@ procedure and the explicit required-check synchronization step.
 ## Photo galleries
 
 Each gift supports up to 20 JPEG/PNG/WebP/GIF photos (8 MB each). Select several
-files at once or add more in subsequent selections. In the editor, drag a
-thumbnail or its handle to reorder; arrow buttons also work with a keyboard.
-The first photo is the cover. Remove individual photos with the hover/focus
-cross (always visible on touch devices), then Save. Cancel discards unsaved
+files at once or add more in subsequent selections. In the editor, drag the
+photo itself to reorder, with no handles or movement buttons. The first photo
+is the cover. A round trash button appears in the upper-right corner on
+hover/focus (tap to focus on touch devices). Delete individual photos, then Save. Cancel discards unsaved
 editor changes. Existing single-photo gifts migrate automatically without
 copying image objects. Upload retries reuse photo IDs and preserve completed
 uploads, including when an upload response was lost.
