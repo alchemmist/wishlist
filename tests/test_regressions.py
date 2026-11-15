@@ -80,3 +80,90 @@ def test_anonymous_reservations_still_require_a_name(http):
     http.cookies.clear()
     assert http.post(path + '/reserve').status_code == 422
     assert http.post(path + '/release').status_code == 422
+
+
+def gallery_upload(http, item_id, photo_id=None):
+    from uuid import uuid4
+    from pathlib import Path
+    return http.put(f'/api/items/{item_id}/images/{photo_id or uuid4()}', files={
+        'file': ('coffee.webp', Path('static/assets/photos/coffee-1.webp').read_bytes(), 'image/webp')})
+
+
+def test_gallery_order_removal_cover_and_idempotent_upload(http):
+    from uuid import uuid4
+    from app.main import store
+    item_id = http.post('/api/wishlists/tester/items', json={'title': 'Gallery'}).json()['id']
+    first_id = str(uuid4())
+    first = gallery_upload(http, item_id, first_id).json()
+    assert gallery_upload(http, item_id, first_id).json() == first
+    second = gallery_upload(http, item_id).json()
+    third = gallery_upload(http, item_id).json()
+    path = f'/api/items/{item_id}/images'
+    assert http.patch(path, json={'ids': [third['id'], first['id'], second['id']]}).status_code == 200
+    item = http.get('/api/wishlists/tester').json()['items'][0]
+    assert item['photos'] == [third, first, second]
+    assert item['image'] == third['url']
+    removed_key = db.execute('SELECT image_key FROM item_images WHERE id = ?', (first_id,)).fetchone()[0]
+    assert http.patch(path, json={'ids': [second['id'], third['id']]}).status_code == 200
+    assert store.read(removed_key) is None
+    assert http.get('/api/wishlists/tester').json()['items'][0]['image'] == second['url']
+    assert http.patch(path, json={'ids': []}).json() == {'photos': []}
+    item = http.get('/api/wishlists/tester').json()['items'][0]
+    assert item['image'] is None and item['photos'] == []
+
+
+def test_gallery_ownership_and_order_validation(http):
+    item_id = http.post('/api/wishlists/tester/items', json={'title': 'One'}).json()['id']
+    other_id = http.post('/api/wishlists/tester/items', json={'title': 'Two'}).json()['id']
+    first = gallery_upload(http, item_id).json()
+    other = gallery_upload(http, other_id).json()
+    path = f'/api/items/{item_id}/images'
+    assert http.patch(path, json={'ids': [other['id']]}).status_code == 422
+    assert http.patch(path, json={'ids': [first['id'], first['id']]}).status_code == 422
+    assert gallery_upload(http, other_id, first['id']).status_code == 409
+    assert http.get('/api/wishlists/tester').json()['items'][0]['photos'] == [first]
+    http.cookies.clear()
+    assert gallery_upload(http, item_id).status_code == 401
+    assert http.patch(path, json={'ids': []}).status_code == 401
+
+
+def test_gallery_limit_and_item_deletion_cleanup(http):
+    from app.main import store
+    item_id = http.post('/api/wishlists/tester/items', json={'title': 'Limit'}).json()['id']
+    for _ in range(20):
+        assert gallery_upload(http, item_id).status_code == 200
+    assert gallery_upload(http, item_id).status_code == 409
+    keys = [row[0] for row in db.execute('SELECT image_key FROM item_images WHERE item_id = ?', (item_id,))]
+    assert len(keys) == 20
+    assert http.delete(f'/api/items/{item_id}').status_code == 204
+    assert not db.execute('SELECT 1 FROM item_images').fetchone()
+    assert all(store.read(key) is None for key in keys)
+
+
+def test_legacy_photo_migration_is_idempotent(tmp_path):
+    from app.db import connect
+    path = tmp_path / 'old.sqlite'
+    connection = connect(path)
+    connection.execute("INSERT INTO users(id, sub, username) VALUES (1, 'old', 'old')")
+    connection.execute("INSERT INTO items(id, owner_id, title, image_key) VALUES (1, 1, 'Old', '1/existing.webp')")
+    connection.commit()
+    connection.close()
+    for _ in range(2):
+        connection = connect(path)
+        rows = connection.execute('SELECT * FROM item_images').fetchall()
+        assert len(rows) == 1 and rows[0]['image_key'] == '1/existing.webp'
+        assert connection.execute('PRAGMA integrity_check').fetchone()[0] == 'ok'
+        assert not connection.execute('PRAGMA foreign_key_check').fetchall()
+        connection.close()
+
+
+def test_gallery_parallel_retries_do_not_duplicate_photos(http):
+    from concurrent.futures import ThreadPoolExecutor
+    from uuid import uuid4
+    item_id = http.post('/api/wishlists/tester/items', json={'title': 'Retry'}).json()['id']
+    photo_id = str(uuid4())
+    with ThreadPoolExecutor(max_workers=6) as pool:
+        responses = list(pool.map(lambda _: gallery_upload(http, item_id, photo_id), range(6)))
+    assert all(response.status_code == 200 for response in responses)
+    assert len({response.json()['url'] for response in responses}) == 1
+    assert db.execute('SELECT COUNT(*) FROM item_images WHERE item_id = ?', (item_id,)).fetchone()[0] == 1

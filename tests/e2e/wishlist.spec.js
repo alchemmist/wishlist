@@ -121,7 +121,7 @@ test('other signed-in user cannot mutate a wishlist through UI or API', async ({
 test('photo upload failure can be retried without creating a duplicate', async ({page}) => {
   await signIn(page);
   let attempts = 0;
-  await page.route('**/api/items/*/image', async route => {
+  await page.route('**/api/items/*/images/*', async route => {
     if (++attempts === 1) await route.fulfill({status: 503, json: {detail: 'Storage down'}});
     else await route.continue();
   });
@@ -160,6 +160,7 @@ test('invalid links, oversized photo and invalid image show recoverable errors',
   await page.getByLabel('Photo', {exact: true}).setInputFiles({name: 'big.png', mimeType: 'image/png', buffer: Buffer.alloc(8000001)});
   await page.getByRole('button', {name: 'Add', exact: true}).click();
   await expect(page.locator('#composer-error')).toHaveText('Photo must be under 8 MB.');
+  await page.getByRole('button', {name: 'Remove photo', exact: true}).click();
   await page.getByLabel('Photo', {exact: true}).setInputFiles({name: 'fake.png', mimeType: 'image/png', buffer: Buffer.from('not an image')});
   await page.getByRole('button', {name: 'Add', exact: true}).click();
   await expect(page.locator('#composer-error')).toContainText('Gift saved, but the photo');
@@ -330,4 +331,84 @@ test('signed-in toggle waits for account lookup and recovers from network failur
   await page.getByRole('switch').click();
   await expect(page.getByRole('switch')).toHaveAttribute('aria-checked', 'false');
   await expect(page.getByRole('dialog')).toBeHidden();
+});
+
+test('multiple photos: append selections, drag order, individual remove, save/reload and cancel', async ({page}) => {
+  await signIn(page);
+  await page.getByRole('textbox', {name: 'Title', exact: true}).fill('Gallery gift');
+  await page.getByLabel('Photo', {exact: true}).setInputFiles([photo, {...photo, name: 'second.webp'}]);
+  await expect(page.locator('.photo-tile')).toHaveCount(2);
+  await page.getByLabel('Photo', {exact: true}).setInputFiles({...photo, name: 'third.webp'});
+  await expect(page.locator('.photo-tile')).toHaveCount(3);
+  const original = await page.locator('.photo-tile').evaluateAll(tiles => tiles.map(tile => tile.dataset.photoId));
+  await page.locator('.photo-tile').first().dragTo(page.locator('.photo-tile').nth(2));
+  const initial = await page.locator('.photo-tile').evaluateAll(tiles => tiles.map(tile => tile.dataset.photoId));
+  expect(initial).not.toEqual(original);
+  const handle = page.getByRole('button', {name: 'Drag photo 1', exact: true});
+  const source = await handle.boundingBox(); const target = await page.locator('.photo-tile').nth(2).boundingBox();
+  await page.mouse.move(source.x + source.width / 2, source.y + source.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(target.x + target.width / 2, target.y + target.height / 2, {steps: 12});
+  await page.mouse.up();
+  const dragged = await page.locator('.photo-tile').evaluateAll(tiles => tiles.map(tile => tile.dataset.photoId));
+  expect(dragged).not.toEqual(initial);
+  expect(dragged[2]).toBe(initial[0]);
+  await page.getByRole('button', {name: 'Move photo 3 left', exact: true}).click();
+  const order = await page.locator('.photo-tile').evaluateAll(tiles => tiles.map(tile => tile.dataset.photoId));
+  await page.locator('.photo-tile').nth(2).hover();
+  await page.getByRole('button', {name: 'Remove photo 3', exact: true}).click();
+  await expect(page.locator('.photo-tile')).toHaveCount(2);
+  await page.getByRole('button', {name: 'Add', exact: true}).click();
+  await expect(page.locator('.gift .product-photo')).toHaveCount(2);
+  const user = (await (await page.request.get('/api/me')).json()).user.username;
+  let item = (await (await page.request.get('/api/wishlists/' + user)).json()).items[0];
+  expect(item.photos.map(photo => photo.id)).toEqual(order.slice(0, 2));
+  expect(item.image).toBe(item.photos[0].url);
+  await page.reload();
+  await page.getByRole('button', {name: 'Edit Gallery gift', exact: true}).click();
+  await expect(page.locator('.photo-tile')).toHaveCount(2);
+  await page.getByRole('button', {name: 'Move photo 2 left', exact: true}).click();
+  await page.getByRole('button', {name: 'Save', exact: true}).click();
+  await expect(page.locator('#composer [type=submit]')).toHaveText('Add');
+  item = (await (await page.request.get('/api/wishlists/' + user)).json()).items[0];
+  expect(item.photos.map(photo => photo.id)).toEqual(order.slice(0, 2).reverse());
+  await page.getByRole('button', {name: 'Edit Gallery gift', exact: true}).click();
+  await page.getByRole('button', {name: 'Remove photo 1', exact: true}).click();
+  await page.getByRole('button', {name: 'Cancel', exact: true}).click();
+  await expect(page.locator('.gift .product-photo')).toHaveCount(2);
+  await page.getByRole('button', {name: 'Edit Gallery gift', exact: true}).click();
+  await page.locator('.photo-tile').first().hover();
+  await page.getByRole('button', {name: 'Remove photo 1', exact: true}).click();
+  await page.getByRole('button', {name: 'Save', exact: true}).click();
+  await expect(page.locator('.gift .product-photo')).toHaveCount(1);
+  await page.reload();
+  await expect(page.locator('.gift .product-photo')).toHaveCount(1);
+});
+
+test('partial multi-photo upload with a lost response retries without duplicates or reuploading saved photos', async ({page}) => {
+  await signIn(page);
+  await page.getByRole('textbox', {name: 'Title', exact: true}).fill('Retry gallery');
+  await page.getByLabel('Photo', {exact: true}).setInputFiles([photo, {...photo, name: 'second.webp'}]);
+  let attempts = 0;
+  await page.route('**/api/items/*/images/*', async route => {
+    attempts++;
+    if (attempts === 2) {
+      // Commit via the isolated request context, then lose the browser response.
+      // WebKit does not reliably expose intercepted multipart bodies to route.fetch().
+      expect((await page.request.put(route.request().url(), {multipart: {file: photo}})).status()).toBe(200);
+      await route.abort('failed');
+    }
+    else await route.continue();
+  });
+  await page.getByRole('button', {name: 'Add', exact: true}).click();
+  await expect(page.locator('#composer-error')).toContainText('Connection failed');
+  const user = (await (await page.request.get('/api/me')).json()).user.username;
+  const before = (await (await page.request.get('/api/wishlists/' + user)).json()).items[0];
+  expect(before.photos).toHaveLength(2);
+  await page.getByRole('button', {name: 'Save', exact: true}).click();
+  await expect(page.locator('.gift .product-photo')).toHaveCount(2);
+  expect(attempts).toBe(2);
+  const after = (await (await page.request.get('/api/wishlists/' + user)).json()).items;
+  expect(after).toHaveLength(1);
+  expect(after[0].photos).toEqual(before.photos);
 });

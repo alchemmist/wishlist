@@ -4,8 +4,8 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Wishlist</title>
-<link rel="stylesheet" href="/static/style.css?v=audit1">
-<script src="/static/app.js?v=audit1" type="module"></script>
+<link rel="stylesheet" href="/static/style.css?v=gallery1">
+<script src="/static/app.js?v=gallery1" type="module"></script>
 </head>
 <body>
 <main>
@@ -17,8 +17,9 @@
     <textarea aria-label="Description" name="description" placeholder="Description" maxlength="400"></textarea>
     <input aria-label="Price" name="price" placeholder="Price" maxlength="40">
     <textarea aria-label="Links, one per line" name="links" placeholder="Links, one per line"></textarea>
-    <label class="photo-field">Photo<input name="image" type="file" accept="image/jpeg,image/png,image/webp,image/gif"></label>
-    <img id="photo-preview" alt="Photo preview" hidden>
+    <label class="photo-field">Photo<input name="image" type="file" multiple accept="image/jpeg,image/png,image/webp,image/gif"></label>
+    <p class="photo-help">Up to 20 photos, 8 MB each. Drag to reorder; the first photo is the cover.</p>
+    <div id="photo-previews" aria-label="Photo order" role="list"></div>
     <button id="remove-photo" type="button" hidden>Remove photo</button>
     <div class="composer-actions"><button type="submit">Add</button><button id="cancel-edit" type="button" hidden>Cancel</button><button id="delete-item" class="danger" type="button" hidden>Delete gift</button></div>
     <p id="composer-error" role="alert"></p>

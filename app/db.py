@@ -39,6 +39,13 @@ def connect(path: Path, initialize: bool = True) -> sqlite3.Connection:
           image_key TEXT,
           position INTEGER NOT NULL DEFAULT 0
         );
+        CREATE TABLE IF NOT EXISTS item_images (
+          id TEXT PRIMARY KEY,
+          item_id INTEGER NOT NULL REFERENCES items(id) ON DELETE CASCADE,
+          image_key TEXT NOT NULL UNIQUE,
+          position INTEGER NOT NULL DEFAULT 0
+        );
+        CREATE INDEX IF NOT EXISTS item_images_order ON item_images(item_id, position, id);
         CREATE TABLE IF NOT EXISTS links (
           id INTEGER PRIMARY KEY,
           item_id INTEGER NOT NULL REFERENCES items(id) ON DELETE CASCADE,
@@ -56,6 +63,11 @@ def connect(path: Path, initialize: bool = True) -> sqlite3.Connection:
         if "creation_key" not in {row["name"] for row in db.execute("PRAGMA table_info(items)")}:
             db.execute("ALTER TABLE items ADD COLUMN creation_key TEXT")
         db.execute("CREATE UNIQUE INDEX IF NOT EXISTS items_creation_key ON items(owner_id, creation_key)")
+        # Preserve existing photos without copying objects or resurrecting deleted images.
+        db.execute("""INSERT INTO item_images(id, item_id, image_key, position)
+            SELECT 'legacy-' || id, id, image_key, 0 FROM items
+            WHERE image_key IS NOT NULL AND NOT EXISTS
+              (SELECT 1 FROM item_images WHERE item_id = items.id)""")
         seen = {}
         survivors = []
         for row in db.execute("SELECT id, name FROM guests ORDER BY id").fetchall():

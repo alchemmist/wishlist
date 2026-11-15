@@ -6,7 +6,9 @@ const field = name => form.elements.namedItem(name);
 let username;
 try { username = decodeURIComponent(location.pathname.replace(/^\//, '').replace(/\/$/, '')); }
 catch { username = ''; }
-let zoom, current, previewURL;
+let zoom, current;
+let composerPhotos = [];
+let draggedPhoto = null;
 let zoomOpening = false, closeZoomWhenReady = false;
 let composerRequestId;
 let composerBusy = false;
@@ -56,11 +58,16 @@ function card(item) {
   const node = el('article', null, 'gift');
   node.dataset.id = item.id;
   const figure = el('div', null, 'drawing');
-  if (item.image) {
-    const image = el('img', null, 'product-photo');
-    image.src = item.image; image.alt = item.title;
-    image.onerror = () => { image.hidden = true; node.classList.add('no-photo'); };
-    figure.append(image);
+  const photos = item.photos?.length ? item.photos : item.image ? [{url: item.image}] : [];
+  if (photos.length) {
+    photos.forEach((photo, index) => {
+      const image = el('img', null, 'product-photo');
+      image.src = photo.url; image.alt = index ? item.title + ' — photo ' + (index + 1) : item.title;
+      image.loading = 'lazy'; image.draggable = false;
+      image.onerror = () => { image.hidden = true; };
+      figure.append(image);
+    });
+    if (photos.length > 1) figure.classList.add('photo-gallery');
   } else node.classList.add('no-photo');
   const content = el('div', null, 'gift-content');
   const heading = el('h2', item.title);
@@ -244,12 +251,61 @@ document.addEventListener('pointerdown', event => {
   }
 });
 function clearPreview() {
-  if (previewURL) URL.revokeObjectURL(previewURL);
-  previewURL = null; $('#photo-preview').hidden = true; $('#photo-preview').removeAttribute('src');
+  for (const photo of composerPhotos) if (photo.file) URL.revokeObjectURL(photo.url);
+  composerPhotos = []; renderPhotos();
 }
+function movePhoto(id, targetId) {
+  if (composerBusy || id === targetId) return;
+  const from = composerPhotos.findIndex(photo => photo.id === id);
+  const to = composerPhotos.findIndex(photo => photo.id === targetId);
+  if (from < 0 || to < 0) return;
+  composerPhotos.splice(to, 0, composerPhotos.splice(from, 1)[0]); renderPhotos();
+}
+function renderPhotos() {
+  $('#photo-previews').replaceChildren(...composerPhotos.map((photo, index) => {
+    const tile = el('div', null, 'photo-tile'); tile.dataset.photoId = photo.id;
+    tile.setAttribute('role', 'listitem'); tile.draggable = !composerBusy;
+    const image = el('img'); image.src = photo.url; image.alt = 'Photo ' + (index + 1); image.draggable = false;
+    if (!index) image.id = 'photo-preview';
+    const remove = el('button', '×', 'photo-remove'); remove.type = 'button';
+    remove.setAttribute('aria-label', 'Remove photo ' + (index + 1));
+    remove.onclick = () => {
+      if (composerBusy) return;
+      if (photo.file) URL.revokeObjectURL(photo.url);
+      composerPhotos = composerPhotos.filter(value => value !== photo); renderPhotos();
+    };
+    const handle = el('button', '⠿', 'photo-handle'); handle.type = 'button';
+    handle.setAttribute('aria-label', 'Drag photo ' + (index + 1));
+    handle.onpointerdown = event => {
+      if (composerBusy || event.button !== 0) return;
+      event.preventDefault(); draggedPhoto = photo.id;
+      $('#photo-previews').setPointerCapture(event.pointerId);
+    };
+    const controls = el('div', null, 'photo-moves');
+    for (const [offset, text] of [[-1, '←'], [1, '→']]) {
+      const button = el('button', text); button.type = 'button';
+      button.setAttribute('aria-label', 'Move photo ' + (index + 1) + (offset < 0 ? ' left' : ' right'));
+      button.disabled = !composerPhotos[index + offset];
+      button.onclick = () => { movePhoto(photo.id, composerPhotos[index + offset]?.id); $('#photo-previews [data-photo-id="' + photo.id + '"] .photo-handle')?.focus(); };
+      controls.append(button);
+    }
+    tile.ondragstart = event => { if (composerBusy) { event.preventDefault(); return; } draggedPhoto = photo.id; event.dataTransfer.setData('text/plain', photo.id); event.dataTransfer.effectAllowed = 'move'; };
+    tile.ondragover = event => event.preventDefault();
+    tile.ondrop = event => { event.preventDefault(); movePhoto(event.dataTransfer.getData('text/plain'), photo.id); draggedPhoto = null; };
+    tile.ondragend = () => { draggedPhoto = null; };
+    tile.append(image, remove, handle, controls); return tile;
+  }));
+  $('#remove-photo').hidden = !composerPhotos.length;
+}
+$('#photo-previews').onpointermove = event => {
+  if (!draggedPhoto || composerBusy) return;
+  const tile = document.elementFromPoint(event.clientX, event.clientY)?.closest('.photo-tile');
+  if (tile) movePhoto(draggedPhoto, tile.dataset.photoId);
+};
+$('#photo-previews').onpointerup = $('#photo-previews').onpointercancel = () => { draggedPhoto = null; };
 function resetComposer() {
   composerRequestId = null;
-  form.reset(); delete form.dataset.id; delete form.dataset.removeImage;
+  form.reset(); delete form.dataset.id;
   clearPreview(); form.querySelector('[type=submit]').textContent = 'Add';
   for (const id of ['cancel-edit', 'delete-item', 'remove-photo']) $('#' + id).hidden = true;
   $('#composer-error').textContent = '';
@@ -264,18 +320,18 @@ $('#cancel-edit').onclick = async () => {
   resetComposer(); await load();
 };
 $('#remove-photo').onclick = () => {
-  field('image').value = ''; clearPreview(); form.dataset.removeImage = 'true'; $('#remove-photo').hidden = true;
+  field('image').value = ''; clearPreview();
 };
 form.onsubmit = async event => {
   event.preventDefault(); if (composerBusy) return;
-  const file = field('image').files[0];
   composerRequestId ||= crypto.randomUUID();
   const body = {request_id: composerRequestId, title: field('title').value, description: field('description').value, price: field('price').value, links: field('links').value.split(/\n+/).map(value => value.trim()).filter(Boolean)};
   const editing = form.dataset.id;
   setComposerBusy(true); $('#composer-error').textContent = ''; showNotice('');
   try {
     if (!body.title.trim()) throw new Error('Enter a title.');
-    if (file && file.size > 8000000) throw new Error('Photo must be under 8 MB.');
+    if (composerPhotos.length > 20) throw new Error('Use no more than 20 photos.');
+    if (composerPhotos.some(photo => photo.file?.size > 8000000)) throw new Error('Photo must be under 8 MB.');
     if (body.links.length > 20) throw new Error('Use no more than 20 links.');
     for (const url of body.links) if (!service(url)) throw new Error('Links must start with http:// or https://.');
     const response = await fetch(editing ? '/api/items/' + editing : '/api/wishlists/' + encodeURIComponent(username) + '/items', {
@@ -285,14 +341,26 @@ form.onsubmit = async event => {
     const item = await response.json();
     form.dataset.id = item.id; form.querySelector('[type=submit]').textContent = 'Save';
     $('#cancel-edit').hidden = false; $('#delete-item').hidden = false;
-    if (file || form.dataset.removeImage) {
-      let uploaded;
-      if (file) {
-        const data = new FormData(); data.append('file', file);
-        uploaded = await fetch('/api/items/' + item.id + '/image', {method: 'POST', body: data});
-      } else uploaded = await fetch('/api/items/' + item.id + '/image', {method: 'DELETE'});
+    // A previous upload may have committed even if its response was lost.
+    const remoteIds = new Set((item.photos || []).map(photo => photo.id));
+    for (const photo of composerPhotos) if (remoteIds.has(photo.id)) photo.persisted = true;
+    const saveOrder = async () => {
+      const response = await fetch('/api/items/' + item.id + '/images', {
+        method: 'PATCH', headers: {'content-type': 'application/json'},
+        body: JSON.stringify({ids: composerPhotos.filter(photo => photo.persisted).map(photo => photo.id)})
+      });
+      if (!response.ok) throw new Error('Gift saved, but the photo order was not saved. Try Save again.');
+      await response.json();
+    };
+    await saveOrder();
+    for (const photo of composerPhotos) {
+      if (photo.persisted) continue;
+      const data = new FormData(); data.append('file', photo.file);
+      const uploaded = await fetch('/api/items/' + item.id + '/images/' + photo.id, {method: 'PUT', body: data});
       if (!uploaded.ok) throw new Error('Gift saved, but the photo was not saved. Check the file and try Save again.');
+      await uploaded.json(); photo.persisted = true;
     }
+    await saveOrder();
     resetComposer(); showNotice(editing ? 'Gift updated.' : 'Gift added.'); await load();
   } catch (error) { $('#composer-error').textContent = error instanceof TypeError ? 'Connection failed. Your form is kept; please try again.' : error.message; }
   finally { setComposerBusy(false); }
@@ -308,16 +376,16 @@ $('#delete-item').onclick = async () => {
   finally { setComposerBusy(false); }
 };
 field('image').onchange = () => {
-  clearPreview(); const file = field('image').files[0];
-  if (!file) return;
-  delete form.dataset.removeImage;
-  $('#photo-preview').src = previewURL = URL.createObjectURL(file); $('#photo-preview').hidden = false; $('#remove-photo').hidden = false;
+  const files = [...field('image').files]; field('image').value = '';
+  if (composerPhotos.length + files.length > 20) { $('#composer-error').textContent = 'Use no more than 20 photos.'; return; }
+  for (const file of files) composerPhotos.push({id: crypto.randomUUID(), file, url: URL.createObjectURL(file), persisted: false});
+  renderPhotos();
 };
 function startEdit(item) {
   closeReservation(); resetComposer(); form.hidden = false; form.dataset.id = item.id;
   for (const name of ['title', 'description', 'price']) field(name).value = item[name] || '';
   field('links').value = (item.links || []).join('\n');
-  if (item.image) { $('#photo-preview').src = item.image; $('#photo-preview').hidden = false; $('#remove-photo').hidden = false; }
+  composerPhotos = (item.photos || []).map(photo => ({...photo, persisted: true})); renderPhotos();
   $('#cancel-edit').hidden = false; $('#delete-item').hidden = false;
   form.querySelector('[type=submit]').textContent = 'Save';
   form.scrollIntoView({block: 'start'}); field('title').focus({preventScroll: true});

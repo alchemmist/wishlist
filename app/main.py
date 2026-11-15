@@ -5,7 +5,7 @@ import secrets
 import sqlite3
 from pathlib import Path
 from typing import Annotated
-from uuid import UUID
+from uuid import UUID, uuid4
 from urllib.parse import urlsplit, quote
 
 import httpx
@@ -96,6 +96,11 @@ def links_of(item_id: int, db) -> list[str]:
     return [row["url"] for row in db.execute("SELECT url FROM links WHERE item_id = ? ORDER BY id", (item_id,))]
 
 
+def photos_of(item_id, db):
+    return [{"id": row["id"], "url": store.url(row["image_key"])} for row in
+            db.execute("SELECT * FROM item_images WHERE item_id = ? ORDER BY position, id", (item_id,))]
+
+
 def item_json(row, mine: bool, db, links=None, reserved=None) -> dict:
     if reserved is None:
         reserved = db.execute("SELECT 1 FROM reservations WHERE item_id = ?", (row["id"],)).fetchone()
@@ -105,6 +110,7 @@ def item_json(row, mine: bool, db, links=None, reserved=None) -> dict:
         "description": row["description"],
         "price": row["price"],
         "image": store.url(row["image_key"]),
+        "photos": photos_of(row["id"], db),
         "links": links_of(row["id"], db) if links is None else links,
         "reserved": bool(reserved),
         "mine": mine,
@@ -359,14 +365,17 @@ def upload(item_id: int, request: Request, file: UploadFile = File(...), db=Depe
             previous = db.execute("SELECT image_key FROM items WHERE id = ?", (item_id,)).fetchone()
             if not previous:
                 raise HTTPException(404, "Missing item")
+            obsolete = db.execute("SELECT image_key FROM item_images WHERE item_id = ?", (item_id,)).fetchall()
+            db.execute("DELETE FROM item_images WHERE item_id = ?", (item_id,))
+            db.execute("INSERT INTO item_images(id, item_id, image_key) VALUES (?, ?, ?)", (str(uuid4()), item_id, key))
             db.execute("UPDATE items SET image_key = ? WHERE id = ?", (key, item_id))
             db.commit()
         except Exception:
             db.rollback()
             store.delete(key)
             raise
-        if previous["image_key"]:
-            store.delete(previous["image_key"])
+        for photo in obsolete:
+            store.delete(photo["image_key"])
     attach_image()
     return {"image": store.url(key)}
 
@@ -378,10 +387,11 @@ def delete_item(item_id: int, request: Request, db=Depends(get_db)):
     if not row:
         raise HTTPException(404, "Missing item")
     require_owner(request, row["owner_id"], db)
+    obsolete = db.execute("SELECT image_key FROM item_images WHERE item_id = ?", (item_id,)).fetchall()
     db.execute("DELETE FROM items WHERE id = ?", (item_id,))
     db.commit()
-    if row["image_key"]:
-        store.delete(row["image_key"])
+    for photo in obsolete:
+        store.delete(photo["image_key"])
     return Response(status_code=204)
 
 
@@ -392,11 +402,88 @@ def delete_image(item_id: int, request: Request, db=Depends(get_db)):
     if not row:
         raise HTTPException(404, "Missing item")
     require_owner(request, row["owner_id"], db)
+    obsolete = db.execute("SELECT image_key FROM item_images WHERE item_id = ?", (item_id,)).fetchall()
+    db.execute("DELETE FROM item_images WHERE item_id = ?", (item_id,))
     db.execute("UPDATE items SET image_key = NULL WHERE id = ?", (item_id,))
     db.commit()
-    if row["image_key"]:
-        store.delete(row["image_key"])
+    for photo in obsolete:
+        store.delete(photo["image_key"])
     return {"image": None}
+
+
+class PhotoOrder(BaseModel):
+    ids: list[Annotated[str, StringConstraints(max_length=80)]] = Field(max_length=20)
+
+
+def photo_owner(item_id, request, db):
+    row = db.execute("SELECT * FROM items WHERE id = ?", (item_id,)).fetchone()
+    if not row:
+        raise HTTPException(404, "Missing item")
+    require_owner(request, row["owner_id"], db)
+    return row
+
+
+@app.put("/api/items/{item_id}/images/{photo_id}")
+def add_photo(item_id: int, photo_id: UUID, request: Request, file: UploadFile = File(...), db=Depends(get_db)):
+    row = photo_owner(item_id, request, db)
+    photo_id = str(photo_id)
+    existing = db.execute("SELECT * FROM item_images WHERE id = ?", (photo_id,)).fetchone()
+    if existing:
+        if existing["item_id"] != item_id:
+            raise HTTPException(409, "Photo identifier already in use")
+        return {"id": photo_id, "url": store.url(existing["image_key"])}
+    data = file.file.read(8_000_001)
+    if not data or len(data) > 8_000_000:
+        raise HTTPException(400, "Image must be under 8 MB")
+    try:
+        key = store.put(str(row["owner_id"]), data, file.content_type or "application/octet-stream")
+    except ValueError as exc:
+        raise HTTPException(415, str(exc))
+    except Exception:
+        raise HTTPException(503, "Photo storage is unavailable")
+    try:
+        db.execute("BEGIN IMMEDIATE")
+        photo_owner(item_id, request, db)
+        existing = db.execute("SELECT * FROM item_images WHERE id = ?", (photo_id,)).fetchone()
+        if existing:
+            if existing["item_id"] != item_id:
+                raise HTTPException(409, "Photo identifier already in use")
+            db.rollback()
+            store.delete(key)
+            return {"id": photo_id, "url": store.url(existing["image_key"])}
+        count = db.execute("SELECT COUNT(*) FROM item_images WHERE item_id = ?", (item_id,)).fetchone()[0]
+        if count >= 20:
+            raise HTTPException(409, "Use no more than 20 photos")
+        position = db.execute("SELECT COALESCE(MAX(position), -1) + 1 FROM item_images WHERE item_id = ?", (item_id,)).fetchone()[0]
+        db.execute("INSERT INTO item_images VALUES (?, ?, ?, ?)", (photo_id, item_id, key, position))
+        if not count:
+            db.execute("UPDATE items SET image_key = ? WHERE id = ?", (key, item_id))
+        db.commit()
+    except Exception:
+        db.rollback()
+        store.delete(key)
+        raise
+    return {"id": photo_id, "url": store.url(key)}
+
+
+@app.patch("/api/items/{item_id}/images")
+def save_photos(item_id: int, body: PhotoOrder, request: Request, db=Depends(get_db)):
+    db.execute("BEGIN IMMEDIATE")
+    photo_owner(item_id, request, db)
+    photos = {row["id"]: row["image_key"] for row in db.execute("SELECT * FROM item_images WHERE item_id = ?", (item_id,))}
+    if len(set(body.ids)) != len(body.ids) or any(photo_id not in photos for photo_id in body.ids):
+        raise HTTPException(422, "Invalid photo order")
+    removed = set(photos) - set(body.ids)
+    for photo_id in removed:
+        db.execute("DELETE FROM item_images WHERE id = ? AND item_id = ?", (photo_id, item_id))
+    for position, photo_id in enumerate(body.ids):
+        db.execute("UPDATE item_images SET position = ? WHERE id = ? AND item_id = ?", (position, photo_id, item_id))
+    db.execute("UPDATE items SET image_key = ? WHERE id = ?", (photos[body.ids[0]] if body.ids else None, item_id))
+    result = photos_of(item_id, db)
+    db.commit()
+    for photo_id in removed:
+        store.delete(photos[photo_id])
+    return {"photos": result}
 
 
 def reservation_name(request: Request, body: NameIn | None, db):

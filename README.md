@@ -73,3 +73,15 @@ checks, using exactly the checked SHA. For a manual release, run the
 **Quality Graph** workflow on `main`; it checks everything before deploying.
 See [CI.md](CI.md) for the DAG, artifacts, security boundary, bootstrap/probe PR
 procedure and the explicit required-check synchronization step.
+
+
+## Photo galleries
+
+Each gift supports up to 20 JPEG/PNG/WebP/GIF photos (8 MB each). Select several
+files at once or add more in subsequent selections. In the editor, drag a
+thumbnail or its handle to reorder; arrow buttons also work with a keyboard.
+The first photo is the cover. Remove individual photos with the hover/focus
+cross (always visible on touch devices), then Save. Cancel discards unsaved
+editor changes. Existing single-photo gifts migrate automatically without
+copying image objects. Upload retries reuse photo IDs and preserve completed
+uploads, including when an upload response was lost.

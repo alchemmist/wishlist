@@ -72,3 +72,19 @@ body[data-hc-zoom-active] .medium-zoom-overlay{z-index:1000}
 @media(max-width:480px){main{padding-inline:18px}.gift{grid-template-columns:76px minmax(0,1fr);gap:14px}.product-photo{width:76px;height:90px}.reservation-control{grid-column:2;flex-direction:row;justify-content:flex-start;padding:0}.gift.no-photo{grid-template-columns:minmax(0,1fr)}.no-photo .reservation-control{grid-column:1}}
 @media(prefers-reduced-motion:reduce){.reservation-switch,.switch-thumb{transition:none!important}.medium-zoom-image,.medium-zoom-overlay{transition-duration:.001s!important}}
 .gift-title{display:flex;align-items:baseline;gap:2px}.gift-title h2{flex:1;min-width:0}.gift-title .edit-item{flex:none;margin:0}
+/* Ordered multi-photo editor: pointer/touch drag handle plus keyboard buttons. */
+.photo-help{font:11px/1.5 'Courier New',monospace;color:#666;margin:0}
+#photo-previews{display:flex;flex-wrap:wrap;gap:12px;min-width:0}
+.photo-tile{position:relative;width:96px;border:1px solid #ddd;border-radius:5px;background:#fafafa;overflow:hidden}
+.photo-tile img,#photo-preview{display:block;width:94px;height:94px;object-fit:cover;border-radius:0}
+#composer .photo-remove{position:absolute;right:3px;top:3px;width:26px;height:26px;padding:0;border-radius:50%;background:#fff;color:#a22;font-size:22px;line-height:24px;opacity:0}
+.photo-tile:hover .photo-remove,.photo-tile:focus-within .photo-remove{opacity:1}
+#composer .photo-handle{position:absolute;left:3px;top:3px;padding:1px 5px;background:#fffe;cursor:grab;touch-action:none}
+.photo-moves{display:flex;justify-content:space-between}
+#composer .photo-moves button{padding:0 10px;border:0;background:transparent;min-height:28px}
+.photo-gallery{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:4px;min-width:0}
+.photo-gallery .product-photo{width:100%;height:45px;min-width:0}
+.photo-gallery .product-photo:first-child{grid-column:1/-1;height:160px}
+@media(hover:none),(pointer:coarse){#composer .photo-remove{opacity:1}}
+@media(max-width:600px){.photo-gallery .product-photo:first-child{height:112px}.photo-gallery .product-photo{height:30px}}
+@media(max-width:480px){.photo-gallery .product-photo:first-child{height:90px}.photo-gallery .product-photo{height:25px}}
