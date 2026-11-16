@@ -9,7 +9,7 @@ function pump() {
     const job = queue.shift(); running++;
     const loadSpan = beginSpan('browser.image.load', performance.now() < 10_000 ? pageSpan.context : null, {route: '/media/{key}'});
     const image = new Image(); job.image = image;
-    image.decoding = 'async'; image.fetchPriority = job.priority === 0 ? 'high' : 'low';
+    image.decoding = 'async'; image.fetchPriority = job.priority <= 0 ? 'high' : 'low';
     image.onload = async () => {
       try { const decode = beginSpan('browser.image.decode', loadSpan.context, {route: '/media/{key}'});
         try { await image.decode(); decode.end(); } catch (error) { decode.end({error: true}); throw error; }
@@ -33,7 +33,9 @@ function pump() {
 export function preloadPhoto(url, priority = 2) {
   let job = cache.get(url);
   if (job?.state === 'error') { cache.delete(url); job = null; }
-  if (job) { job.priority = Math.min(job.priority, priority); pump(); return job.promise; }
+  if (job) { job.priority = Math.min(job.priority, priority);
+    if (job.image && job.priority <= 0) job.image.fetchPriority = 'high';
+    pump(); return job.promise; }
   job = {url, priority, state: 'pending'};
   job.promise = new Promise((resolve, reject) => { job.resolve = resolve; job.reject = reject; });
   cache.set(url, job); queue.push(job); pump(); return job.promise;

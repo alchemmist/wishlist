@@ -142,7 +142,7 @@ function card(item, index = 0) {
       status.hidden = false; status.textContent = 'Loading photo…'; retry.hidden = true;
       figure.setAttribute('aria-busy', 'true');
       try {
-        await preloadPhoto(photo.preview || photo.url, selected === 0 && coverPriority === 0 ? 0 : 1);
+        await preloadPhoto(photo.preview || photo.url, index === 0 ? coverPriority : -1);
         if (generation !== selection) return;
         image.src = photo.preview || photo.url;
         image.dataset.original = new URL(photo.url, location.href).href; image.removeAttribute('data-zoom-src');
