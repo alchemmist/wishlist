@@ -8,6 +8,7 @@ try { username = decodeURIComponent(location.pathname.replace(/^\//, '').replace
 catch { username = ''; }
 let zoom, current;
 let composerPhotos = [];
+let composerLinks = [];
 let draggedPhoto = null;
 let zoomOpening = false, closeZoomWhenReady = false;
 let composerRequestId;
@@ -339,7 +340,7 @@ $('#photo-previews').onpointermove = event => {
 $('#photo-previews').onpointerup = $('#photo-previews').onpointercancel = () => { draggedPhoto = null; };
 function resetComposer() {
   composerRequestId = null;
-  form.reset(); delete form.dataset.id;
+  form.reset(); delete form.dataset.id; composerLinks = []; renderLinkBadges();
   clearPreview(); form.querySelector('[type=submit]').textContent = 'Add';
   for (const id of ['cancel-edit', 'delete-item']) $('#' + id).hidden = true;
   $('#composer-error').textContent = ''; resizeComposerText();
@@ -355,8 +356,9 @@ $('#cancel-edit').onclick = async () => {
 };
 form.onsubmit = async event => {
   event.preventDefault(); if (composerBusy) return;
+  if (!commitLinks()) return;
   composerRequestId ||= crypto.randomUUID();
-  const body = {request_id: composerRequestId, title: field('title').value, description: field('description').value, price: field('price').value, links: field('links').value.split(/\n+/).map(value => value.trim()).filter(Boolean)};
+  const body = {request_id: composerRequestId, title: field('title').value, description: field('description').value, price: field('price').value, links: [...composerLinks]};
   const editing = form.dataset.id;
   setComposerBusy(true); $('#composer-error').textContent = ''; showNotice('');
   try {
@@ -408,6 +410,47 @@ async function deleteGift(id) {
   finally { setComposerBusy(false); }
 }
 $('#delete-item').onclick = () => deleteGift(form.dataset.id);
+function renderLinkBadges() {
+  $('#link-badges').replaceChildren(...composerLinks.map(url => {
+    const info = service(url);
+    const badge = el('button', null, 'link-badge'); badge.type = 'button';
+    badge.title = url; badge.setAttribute('aria-label', 'Edit link ' + url);
+    if (info && info.kind !== 'web') {
+      const image = el('img'); image.src = '/static/assets/' + info.kind + '.webp'; image.alt = ''; badge.append(image);
+    } else badge.textContent = (info?.label || '?').slice(0, 1).toUpperCase();
+    const remove = () => { if (composerBusy) return; composerLinks = composerLinks.filter(value => value !== url); renderLinkBadges(); };
+    badge.onclick = () => {
+      if (composerBusy || !commitLinks()) return;
+      remove(); field('links').value = url; field('links').focus();
+    };
+    badge.onkeydown = event => {
+      if (event.key === 'Delete' || event.key === 'Backspace') { event.preventDefault(); remove(); field('links').focus(); }
+    };
+    return badge;
+  }));
+  $('#link-badges').scrollLeft = $('#link-badges').scrollWidth;
+}
+function commitLinks(value = field('links').value) {
+  const values = value.split(/\r?\n/).map(value => value.trim()).filter(Boolean);
+  if (values.some(url => url.length > 2048 || !service(url))) {
+    $('#composer-error').textContent = 'Links must start with http:// or https://.'; return false;
+  }
+  const next = [...new Set([...composerLinks, ...values])];
+  if (next.length > 20) { $('#composer-error').textContent = 'Use no more than 20 links.'; return false; }
+  composerLinks = next; field('links').value = ''; renderLinkBadges();
+  $('#composer-error').textContent = ''; return true;
+}
+field('links').onkeydown = event => {
+  if (event.isComposing || composerBusy) return;
+  if (event.key === 'Enter') { event.preventDefault(); commitLinks(); }
+  else if (event.key === 'Backspace' && !field('links').value && composerLinks.length) {
+    event.preventDefault(); field('links').value = composerLinks.pop(); renderLinkBadges();
+  }
+};
+field('links').onpaste = event => {
+  const text = event.clipboardData.getData('text');
+  if (text.includes('\n')) { event.preventDefault(); if (!commitLinks(text)) field('links').value = text; }
+};
 function addPhotos(files) {
   if (composerBusy) return;
   if (composerPhotos.length + files.length > 20) { $('#composer-error').textContent = 'Use no more than 20 photos.'; return; }
@@ -431,7 +474,7 @@ addEventListener('resize', resizeComposerText);
 function startEdit(item) {
   closeReservation(); resetComposer(); form.hidden = false; form.dataset.id = item.id;
   for (const name of ['title', 'description', 'price']) field(name).value = item[name] || '';
-  field('links').value = (item.links || []).join('\n');
+  composerLinks = [...(item.links || [])]; renderLinkBadges();
   composerPhotos = (item.photos || []).map(photo => ({...photo, persisted: true})); renderPhotos();
   $('#cancel-edit').hidden = false; $('#delete-item').hidden = false;
   form.querySelector('[type=submit]').textContent = 'Save';

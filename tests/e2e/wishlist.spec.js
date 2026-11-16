@@ -18,7 +18,10 @@ async function addGift(page, title = 'Coffee grinder', withPhoto = false) {
   await page.getByRole('textbox', {name: 'Title', exact: true}).fill(title);
   await page.getByRole('textbox', {name: 'Description', exact: true}).fill('First line\nSecond line');
   await page.getByRole('textbox', {name: 'Price', exact: true}).fill('12 000 ₽');
-  await page.getByRole('textbox', {name: 'Links, one per line'}).fill('https://ozon.ru/product/test\nhttps://wildberries.ru/catalog/test\nhttps://market.yandex.ru/product/test\nhttps://example.com/gift');
+  for (const url of ['https://ozon.ru/product/test', 'https://wildberries.ru/catalog/test', 'https://market.yandex.ru/product/test', 'https://example.com/gift']) {
+    await page.getByRole('textbox', {name: 'Link', exact: true}).fill(url);
+    await page.getByRole('textbox', {name: 'Link', exact: true}).press('Enter');
+  }
   if (withPhoto) await page.getByLabel('Photo', {exact: true}).setInputFiles(photo);
   await page.getByRole('button', {name: 'Add', exact: true}).click();
   await expect(page.locator('.gift').filter({has: page.getByRole('heading', {name: title, exact: true})})).toBeVisible();
@@ -153,11 +156,11 @@ test('network failure keeps editor data; repeated submit creates one item', asyn
 test('invalid links, oversized photo and invalid image show recoverable errors', async ({page}) => {
   await signIn(page);
   await page.getByRole('textbox', {name: 'Title', exact: true}).fill('Validation');
-  await page.getByRole('textbox', {name: 'Links, one per line'}).fill('javascript:alert(1)');
+  await page.getByRole('textbox', {name: 'Link', exact: true}).fill('javascript:alert(1)');
   await page.getByRole('button', {name: 'Add', exact: true}).click();
   await expect(page.locator('#composer-error')).toContainText('http://');
   await expect(page.locator('.gift')).toHaveCount(0);
-  await page.getByRole('textbox', {name: 'Links, one per line'}).fill('');
+  await page.getByRole('textbox', {name: 'Link', exact: true}).fill('');
   await page.getByLabel('Photo', {exact: true}).setInputFiles({name: 'big.png', mimeType: 'image/png', buffer: Buffer.alloc(8000001)});
   await page.getByRole('button', {name: 'Add', exact: true}).click();
   await expect(page.locator('#composer-error')).toHaveText('Photo must be under 8 MB.');
@@ -520,4 +523,70 @@ test('card-shaped composer aligns with saved cards, plus opens picker, drop appe
     expect(layout.photosTop).toBeGreaterThanOrEqual(layout.dropBottom);
     expect(layout.overflow).toBe(false);
   }
+});
+
+test('photo, title and actions share the top edge in editor and saved cards, including focus and mobile', async ({page}) => {
+  await signIn(page); await addGift(page, 'Top edges', true);
+  await expect(page.locator('#photo-help,.photo-help')).toHaveCount(0);
+  for (const width of [page.viewportSize().width, 320]) {
+    await page.setViewportSize({width, height: 900});
+    await page.getByRole('textbox', {name: 'Title', exact: true}).focus();
+    const edges = await page.evaluate(() => {
+      const top = selector => document.querySelector(selector).getBoundingClientRect().top;
+      return {
+        editor: ['.photo-field', '#composer [name=title]', '.composer-actions button[type=submit]'].map(top),
+        saved: ['.gift .drawing', '.gift h2', '.gift .reservation-switch', '.gift .edit-item', '.gift .delete-item'].map(top),
+        focusOffset: parseFloat(getComputedStyle(document.querySelector('#composer [name=title]')).outlineOffset),
+        overflow: document.documentElement.scrollWidth > innerWidth,
+      };
+    });
+    expect(Math.max(...edges.editor) - Math.min(...edges.editor)).toBeLessThan(1);
+    expect(Math.max(...edges.saved) - Math.min(...edges.saved)).toBeLessThan(1);
+    expect(edges.focusOffset).toBeLessThanOrEqual(0);
+    expect(edges.overflow).toBe(false);
+  }
+});
+
+test('Enter turns links into left badges, narrows input, edits/removes and preserves links across save/reload', async ({page}) => {
+  const username = await signIn(page);
+  await page.getByRole('textbox', {name: 'Title', exact: true}).fill('Link badges');
+  const input = page.getByRole('textbox', {name: 'Link', exact: true});
+  const before = (await input.boundingBox()).width;
+  await input.fill('https://ozon.ru/product/one'); await input.press('Enter');
+  await expect(page.locator('#link-badges button')).toHaveCount(1);
+  await expect(input).toHaveValue('');
+  expect((await input.boundingBox()).width).toBeLessThan(before);
+  const afterOne = (await input.boundingBox()).width;
+  await input.fill('https://example.com/two'); await input.press('Enter');
+  await expect(page.locator('#link-badges button')).toHaveCount(2);
+  expect((await input.boundingBox()).width).toBeLessThan(afterOne);
+  const inputRect = await input.boundingBox(); const badgeRect = await page.locator('#link-badges').boundingBox();
+  expect(badgeRect.x + badgeRect.width).toBeLessThanOrEqual(inputRect.x);
+  await expect(page.locator('.gift')).toHaveCount(0);
+  await input.fill('https://example.com/two'); await input.press('Enter');
+  await expect(page.locator('#link-badges button')).toHaveCount(2);
+  await input.fill('javascript:alert(1)'); await input.press('Enter');
+  await expect(page.locator('#composer-error')).toContainText('http://');
+  await expect(page.locator('#link-badges button')).toHaveCount(2);
+  await input.fill('');
+  await page.getByRole('button', {name: 'Edit link https://ozon.ru/product/one', exact: true}).click();
+  await expect(input).toHaveValue('https://ozon.ru/product/one');
+  await input.fill('https://ozon.ru/product/changed'); await input.press('Enter');
+  await page.getByRole('button', {name: 'Edit link https://example.com/two', exact: true}).focus();
+  await page.keyboard.press('Delete');
+  await expect(page.locator('#link-badges button')).toHaveCount(1);
+  await input.fill('https://example.com/three');
+  await page.getByRole('button', {name: 'Add', exact: true}).click();
+  await expect(page.locator('.gift')).toHaveCount(1);
+  let item = (await (await page.request.get('/api/wishlists/' + username)).json()).items[0];
+  expect(item.links).toEqual(['https://ozon.ru/product/changed', 'https://example.com/three']);
+  await page.reload(); await page.getByRole('button', {name: 'Edit Link badges', exact: true}).click();
+  await expect(page.locator('#link-badges button')).toHaveCount(2);
+  await input.press('Backspace');
+  await expect(input).toHaveValue('https://example.com/three');
+  await input.fill('');
+  await page.getByRole('button', {name: 'Save', exact: true}).click();
+  await expect(page.locator('#composer [type=submit]')).toHaveText('Add');
+  item = (await (await page.request.get('/api/wishlists/' + username)).json()).items[0];
+  expect(item.links).toEqual(['https://ozon.ru/product/changed']);
 });

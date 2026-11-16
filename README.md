@@ -99,3 +99,12 @@ The top editor mirrors a saved card: a dashed photo picker/dropzone with a plus
 on the left, ordered miniatures underneath, borderless Title/Price/Description
 fields in the content column, and Add/Save in place of the reservation control.
 The same layout adapts to mobile; links remain editable below the description.
+
+
+Paste a URL into Link and press Enter: a round service badge appears on the
+left, the input clears and shrinks to leave room for the badges. Click a badge
+to edit its URL, press Delete on a focused badge to remove it, or Backspace in
+an empty input to edit the last URL. Add/Save includes a valid pending URL too.
+Photo, title and action controls share the same top edge on desktop and mobile;
+focus outlines stay within that edge. Upload limits are still enforced without
+permanent explanatory text in the editor.

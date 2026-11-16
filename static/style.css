@@ -102,8 +102,6 @@ body[data-hc-zoom-active] .medium-zoom-overlay{z-index:1000}
 #composer input[name=title]{font:bold 20px/1.35 'Courier New',monospace;margin:0 0 7px}
 #composer input[name=price]{font:14px/1.5 'Courier New',monospace;margin:8px 0}
 #composer textarea[name=description]{font:13px/1.65 Georgia,serif;color:#666;margin:6px 0 12px}
-#composer textarea[name=links]{font:12px/1.5 'Courier New',monospace;margin:12px 0}
-#composer .photo-help{font:10px/1.5 'Courier New',monospace;color:#aaa;margin:10px 0 0}
 .composer-actions{display:flex;flex-direction:column;align-items:stretch;gap:8px;padding-top:4px;min-width:0}
 #composer .composer-actions button{font:12px/1.5 'Courier New',monospace;padding:6px 5px;min-width:0;border-radius:4px}
 .composer-actions button[type=submit]{background:#222;color:#fff;border-color:#222}
@@ -116,3 +114,31 @@ body[data-hc-zoom-active] .medium-zoom-overlay{z-index:1000}
 #composer .photo-remove{width:24px;height:24px}
 @media(max-width:600px){#composer{grid-template-columns:96px minmax(0,1fr) 52px;gap:12px}#composer input[name=title]{font-size:17px}#composer .composer-actions button{font-size:11px}}
 @media(max-width:480px){#composer{grid-template-columns:76px minmax(0,1fr);gap:14px}.composer-media{grid-row:1/span 2}.composer-actions{grid-column:2;flex-direction:row;flex-wrap:wrap;padding:0}#composer .composer-actions button{padding:6px 10px}#composer-error{grid-column:1/-1}.photo-label{font-size:10px}}
+
+/* Shared top edge: no baseline shifts, action padding or outlying focus rings. */
+.gift-title{align-items:flex-start}
+.reservation-control,.composer-actions{padding-top:0}
+#composer input[name=title]:focus-visible{outline-offset:-2px}
+.photo-field:focus-within{outline-offset:-2px}
+#composer .composer-actions button:focus-visible{outline-offset:-2px}
+.composer-links{display:flex;align-items:center;gap:8px;min-width:0;margin-top:12px}
+#link-badges{display:flex;align-items:center;gap:6px;max-width:65%;overflow-x:auto;flex:none;scrollbar-width:thin}
+#link-badges:empty{display:none}
+#composer #link-badges .link-badge{width:30px;height:30px;min-width:30px;min-height:30px;padding:0;border:1px solid #ddd;border-radius:50%;background:#f7f7f7;font:12px/1 'Courier New',monospace;overflow:hidden}
+#composer .composer-links input{flex:1;min-width:0;width:0;font:12px/1.5 'Courier New',monospace;margin:0;overflow:visible}
+#composer .composer-links input:focus-visible{outline-offset:1px}
+@media(max-width:480px){
+  .gift{grid-template-columns:76px minmax(0,1fr) 46px;gap:10px}
+  .drawing{grid-row:auto}
+  .reservation-control{grid-column:auto;flex-direction:column;justify-content:flex-start;padding:0}
+  .gift.no-photo{grid-template-columns:minmax(0,1fr) 46px}
+  .no-photo .reservation-control{grid-column:auto}
+  #composer{grid-template-columns:76px minmax(0,1fr) 46px;gap:10px}
+  .composer-media{grid-row:auto}
+  .composer-actions{grid-column:auto;flex-direction:column;padding:0}
+  #composer .composer-actions button{padding:6px 2px}
+  #link-badges{max-width:55%}
+  #composer #link-badges .link-badge{width:26px;height:26px;min-width:26px;min-height:26px}
+}
+
+.gift button:focus-visible,.gift .product-photo:focus-visible{outline-offset:-2px}
