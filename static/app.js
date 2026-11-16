@@ -75,7 +75,7 @@ function card(item) {
       const indicators = el('div', null, 'photo-story-bars');
       indicators.setAttribute('aria-hidden', 'true');
       for (let index = 0; index < photos.length; index++) indicators.append(el('span'));
-      let active = -1, touchStart = null, swiped = false;
+      let active = -1, touchStart = null, swiped = false, lastMouse = null;
       const show = index => {
         if (zoomOpening || document.body.hasAttribute('data-hc-zoom-active')) return;
         const next = (index + photos.length) % photos.length;
@@ -90,6 +90,10 @@ function card(item) {
       };
       figure.onpointermove = event => {
         if (event.pointerType !== 'mouse') return;
+        // Focus/scroll in WebKit can emit a stationary pointermove; do not
+        // overwrite a keyboard/swipe selection unless the mouse really moved.
+        if (lastMouse && lastMouse.x === event.clientX && lastMouse.y === event.clientY) return;
+        lastMouse = {x: event.clientX, y: event.clientY};
         const box = figure.getBoundingClientRect();
         show(Math.max(0, Math.min(photos.length - 1, Math.floor((event.clientX - box.left) / box.width * photos.length))));
       };
