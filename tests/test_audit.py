@@ -133,18 +133,15 @@ def test_images_round_trip_replace_and_cleanup(owner, fmt, mime, suffix):
 def test_upload_limits_and_storage_failure(owner, monkeypatch):
     item = create(owner)
     path = f'/api/items/{item}/image'
-    assert owner.post(path, files={'file': ('big.png', b'x' * 8_000_001, 'image/png')}).status_code == 400
+    assert owner.post(path, files={'file': ('big.png', image_bytes() + b'\0' * 9_000_001, 'image/png')}).status_code == 200
     assert owner.post(path, files={'file': ('empty.png', b'', 'image/png')}).status_code == 400
     assert owner.post(path, files={'file': ('mismatch.jpg', image_bytes(), 'image/jpeg')}).status_code == 415
     assert owner.post(path, files={'file': ('truncated.png', b'\x89PNG\r\n\x1a\n', 'image/png')}).status_code == 415
-    monkeypatch.setattr(Image, 'MAX_IMAGE_PIXELS', 100)
-    assert owner.post(path, files={'file': ('bomb.png', image_bytes(), 'image/png')}).status_code == 415
-    monkeypatch.setattr(Image, 'MAX_IMAGE_PIXELS', 25_000_000)
     def fail(*args):
         raise OSError('storage offline')
-    monkeypatch.setattr(store, 'put', fail)
+    monkeypatch.setattr(store, 'put_file', fail)
     assert owner.post(path, files={'file': ('valid.png', image_bytes(), 'image/png')}).status_code == 503
-    monkeypatch.setattr(store, 'read', fail)
+    monkeypatch.setattr(store, 'open', fail)
     assert owner.get('/media/1/file.png').status_code == 503
 
 
@@ -248,7 +245,10 @@ def test_request_body_limits_include_chunked_requests(owner):
             yield b'x' * 10000
         yield b'"}'
     assert owner.post('/api/wishlists/AuditOwner/items', content=chunks(), headers={'content-type': 'application/json'}).status_code == 413
-    assert owner.post('/api/items/1/image', content=b'x' * 9000001, headers={'content-type': 'multipart/form-data; boundary=test'}).status_code == 413
+    # Multipart image streams no longer have a byte cap; unauthenticated ones
+    # are rejected before consuming an unbounded body.
+    owner.cookies.clear()
+    assert owner.post('/api/items/1/image', content=b'x' * 9000001, headers={'content-type': 'multipart/form-data; boundary=test'}).status_code == 401
 
 
 def test_partial_s3_configuration_fails_instead_of_silently_using_disk(tmp_path):

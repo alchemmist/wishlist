@@ -10,10 +10,11 @@ from urllib.parse import urlsplit, quote
 
 import httpx
 from fastapi import Depends, FastAPI, File, HTTPException, Request, UploadFile
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, StringConstraints
 from starlette.concurrency import run_in_threadpool
+from starlette.background import BackgroundTask
 
 from app.db import connect, guest
 from app.storage import Store
@@ -350,11 +351,10 @@ def upload(item_id: int, request: Request, file: UploadFile = File(...), db=Depe
     if not row:
         raise HTTPException(404, "Missing item")
     require_owner(request, row["owner_id"], db)
-    data = file.file.read(8_000_001)
-    if not data or len(data) > 8_000_000:
-        raise HTTPException(400, "Image must be under 8 MB")
+    if file.size == 0:
+        raise HTTPException(400, "Choose a non-empty image")
     try:
-        key = store.put(str(row["owner_id"]), data, file.content_type or "application/octet-stream")
+        key = store.put_file(str(row["owner_id"]), file.file, file.content_type or "application/octet-stream")
     except ValueError as exc:
         raise HTTPException(415, str(exc))
     except Exception:
@@ -412,7 +412,7 @@ def delete_image(item_id: int, request: Request, db=Depends(get_db)):
 
 
 class PhotoOrder(BaseModel):
-    ids: list[Annotated[str, StringConstraints(max_length=80)]] = Field(max_length=20)
+    ids: list[Annotated[str, StringConstraints(max_length=80)]]
 
 
 def photo_owner(item_id, request, db):
@@ -432,11 +432,10 @@ def add_photo(item_id: int, photo_id: UUID, request: Request, file: UploadFile =
         if existing["item_id"] != item_id:
             raise HTTPException(409, "Photo identifier already in use")
         return {"id": photo_id, "url": store.url(existing["image_key"])}
-    data = file.file.read(8_000_001)
-    if not data or len(data) > 8_000_000:
-        raise HTTPException(400, "Image must be under 8 MB")
+    if file.size == 0:
+        raise HTTPException(400, "Choose a non-empty image")
     try:
-        key = store.put(str(row["owner_id"]), data, file.content_type or "application/octet-stream")
+        key = store.put_file(str(row["owner_id"]), file.file, file.content_type or "application/octet-stream")
     except ValueError as exc:
         raise HTTPException(415, str(exc))
     except Exception:
@@ -452,8 +451,6 @@ def add_photo(item_id: int, photo_id: UUID, request: Request, file: UploadFile =
             store.delete(key)
             return {"id": photo_id, "url": store.url(existing["image_key"])}
         count = db.execute("SELECT COUNT(*) FROM item_images WHERE item_id = ?", (item_id,)).fetchone()[0]
-        if count >= 20:
-            raise HTTPException(409, "Use no more than 20 photos")
         position = db.execute("SELECT COALESCE(MAX(position), -1) + 1 FROM item_images WHERE item_id = ?", (item_id,)).fetchone()[0]
         db.execute("INSERT INTO item_images VALUES (?, ?, ?, ?)", (photo_id, item_id, key, position))
         if not count:
@@ -535,13 +532,19 @@ def media(key: str):
     if ".." in key.split("/"):
         raise HTTPException(404)
     try:
-        data = store.read(key)
+        body = store.open(key)
     except Exception:
         logger.exception("Photo storage read failed")
         raise HTTPException(503, "Photo storage is unavailable")
-    if data is None:
+    if body is None:
         raise HTTPException(404)
-    return Response(data, media_type=store.content_type(key), headers={"X-Content-Type-Options": "nosniff", "Cache-Control": "public, max-age=86400"})
+    def chunks():
+        try:
+            while chunk := body.read(64 * 1024):
+                yield chunk
+        finally:
+            body.close()
+    return StreamingResponse(chunks(), background=BackgroundTask(body.close), media_type=store.content_type(key), headers={"X-Content-Type-Options": "nosniff", "Cache-Control": "public, max-age=86400"})
 
 
 @app.get("/")

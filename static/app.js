@@ -9,6 +9,7 @@ catch { username = ''; }
 let zoom, current;
 let composerPhotos = [];
 let composerLinks = [];
+let saveController = null;
 let draggedPhoto = null;
 let zoomOpening = false, closeZoomWhenReady = false;
 let composerRequestId;
@@ -79,12 +80,13 @@ function card(item) {
         if (zoomOpening || document.body.hasAttribute('data-hc-zoom-active')) return;
         const next = (index + photos.length) % photos.length;
         if (active === next) return;
+        indicators.children[active]?.classList.remove('active');
         active = next;
         image.src = photos[active].url; image.hidden = false;
         image.alt = active ? item.title + ' — photo ' + (active + 1) : item.title;
         image.setAttribute('aria-label', 'Enlarge photo: ' + image.alt);
         figure.dataset.photoIndex = active;
-        [...indicators.children].forEach((bar, index) => bar.classList.toggle('active', index === active));
+        indicators.children[active].classList.add('active');
       };
       figure.onpointermove = event => {
         if (event.pointerType !== 'mouse') return;
@@ -315,7 +317,7 @@ function renderPhotos() {
       movePhoto(photo.id, composerPhotos[index + (event.key === 'ArrowLeft' ? -1 : 1)]?.id);
       $('#photo-previews [data-photo-id="' + photo.id + '"]')?.focus();
     };
-    const image = el('img'); image.src = photo.url; image.alt = 'Photo ' + (index + 1); image.draggable = false;
+    const image = el('img'); image.src = photo.url; image.alt = 'Photo ' + (index + 1); image.draggable = false; image.loading = 'lazy'; image.decoding = 'async';
     if (!index) image.id = 'photo-preview';
     const remove = el('button', null, 'photo-remove');
     remove.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M9 6V3h6v3M5 6l1 15h12l1-15M10 10v7M14 10v7"/></svg>'; remove.type = 'button';
@@ -347,56 +349,119 @@ function resetComposer() {
 }
 function setComposerBusy(busy) {
   composerBusy = busy;
-  for (const control of form.elements) control.disabled = busy;
+  for (const control of form.elements) control.disabled = busy && control.id !== 'stop-saving';
   form.setAttribute('aria-busy', String(busy));
 }
 $('#cancel-edit').onclick = async () => {
   if (composerBusy) return;
   resetComposer(); await load();
 };
+function saveStatus(message, detail = '', percent = null) {
+  $('#save-status').textContent = message; $('#save-detail').textContent = detail;
+  if (percent === null) $('#save-meter').removeAttribute('value');
+  else $('#save-meter').value = percent;
+}
+function uploadPhoto(itemId, photo, signal, onProgress, onReceived) {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    const cleanup = () => signal.removeEventListener('abort', abort);
+    const abort = () => { xhr.abort(); cleanup(); reject(new DOMException('Saving stopped', 'AbortError')); };
+    if (signal.aborted) { abort(); return; }
+    signal.addEventListener('abort', abort, {once: true});
+    xhr.open('PUT', '/api/items/' + itemId + '/images/' + photo.id);
+    xhr.upload.onprogress = event => { if (event.lengthComputable) onProgress(event.loaded / event.total); };
+    xhr.upload.onload = onReceived;
+    xhr.onload = () => {
+      cleanup();
+      if (xhr.status < 200 || xhr.status >= 300) {
+        reject(new Error('Gift saved, but the photo was not saved (HTTP ' + xhr.status + '). ' +
+          (xhr.status === 413 ? 'The proxy rejected the upload. Your files are kept; try Save again.' : 'Check the file or connection and try Save again.'))); return;
+      }
+      try { JSON.parse(xhr.responseText); resolve(); }
+      catch { reject(new Error('The server returned an invalid upload response. Your files are kept; try Save again.')); }
+    };
+    xhr.onerror = () => { cleanup(); reject(new TypeError('Upload connection failed')); };
+    const data = new FormData(); data.append('file', photo.file); xhr.send(data);
+  });
+}
+$('#stop-saving').onclick = () => saveController?.abort();
+addEventListener('beforeunload', event => { if (saveController) { event.preventDefault(); event.returnValue = ''; } });
 form.onsubmit = async event => {
   event.preventDefault(); if (composerBusy) return;
   if (!commitLinks()) return;
   composerRequestId ||= crypto.randomUUID();
   const body = {request_id: composerRequestId, title: field('title').value, description: field('description').value, price: field('price').value, links: [...composerLinks]};
   const editing = form.dataset.id;
+  saveController = new AbortController(); const controller = saveController;
+  const started = Date.now();
+  $('#save-progress').hidden = false; $('#save-progress').dataset.state = 'saving'; $('#stop-saving').hidden = false;
+  const submitButton = form.querySelector('[type=submit]'); submitButton.textContent = 'Saving…';
+  saveStatus(editing ? 'Saving changes…' : 'Creating gift…', 'Your form and selected photos are kept until saving finishes.');
+  const tick = () => { const seconds = Math.floor((Date.now() - started) / 1000); $('#save-elapsed').textContent = 'Elapsed ' + Math.floor(seconds / 60) + ':' + String(seconds % 60).padStart(2, '0'); };
+  tick(); const timer = setInterval(tick, 1000);
   setComposerBusy(true); $('#composer-error').textContent = ''; showNotice('');
+  $('#save-progress').scrollIntoView({block: 'nearest'});
   try {
     if (!body.title.trim()) throw new Error('Enter a title.');
-    if (composerPhotos.length > 20) throw new Error('Use no more than 20 photos.');
-    if (composerPhotos.some(photo => photo.file?.size > 8000000)) throw new Error('Photo must be under 8 MB.');
     if (body.links.length > 20) throw new Error('Use no more than 20 links.');
     for (const url of body.links) if (!service(url)) throw new Error('Links must start with http:// or https://.');
     const response = await fetch(editing ? '/api/items/' + editing : '/api/wishlists/' + encodeURIComponent(username) + '/items', {
-      method: editing ? 'PATCH' : 'POST', headers: {'content-type': 'application/json'}, body: JSON.stringify(body)
+      signal: controller.signal, method: editing ? 'PATCH' : 'POST', headers: {'content-type': 'application/json'}, body: JSON.stringify(body)
     });
     if (!response.ok) throw new Error(response.status === 401 ? 'Please sign in again.' : response.status === 403 ? 'This is not your wishlist.' : 'Could not save. Check the fields and links.');
     const item = await response.json();
-    form.dataset.id = item.id; form.querySelector('[type=submit]').textContent = 'Save';
+    form.dataset.id = item.id;
     $('#cancel-edit').hidden = false; $('#delete-item').hidden = false;
     // A previous upload may have committed even if its response was lost.
     const remoteIds = new Set((item.photos || []).map(photo => photo.id));
     for (const photo of composerPhotos) if (remoteIds.has(photo.id)) photo.persisted = true;
     const saveOrder = async () => {
       const response = await fetch('/api/items/' + item.id + '/images', {
-        method: 'PATCH', headers: {'content-type': 'application/json'},
+        signal: controller.signal, method: 'PATCH', headers: {'content-type': 'application/json'},
         body: JSON.stringify({ids: composerPhotos.filter(photo => photo.persisted).map(photo => photo.id)})
       });
       if (!response.ok) throw new Error('Gift saved, but the photo order was not saved. Try Save again.');
       await response.json();
     };
+    saveStatus('Preparing gallery…');
     await saveOrder();
-    for (const photo of composerPhotos) {
-      if (photo.persisted) continue;
-      const data = new FormData(); data.append('file', photo.file);
-      const uploaded = await fetch('/api/items/' + item.id + '/images/' + photo.id, {method: 'PUT', body: data});
-      if (!uploaded.ok) throw new Error('Gift saved, but the photo was not saved. Check the file and try Save again.');
-      await uploaded.json(); photo.persisted = true;
-    }
+    const pending = composerPhotos.filter(photo => !photo.persisted);
+    const totalBytes = pending.reduce((total, photo) => total + photo.file.size, 0);
+    const sent = new Map(); let completed = 0, cursor = 0;
+    const formatBytes = value => value >= 1024 * 1024 ? (value / (1024 * 1024)).toFixed(1) + ' MB' : Math.round(value / 1024) + ' KB';
+    const update = (photo, ratio, received = false) => {
+      sent.set(photo.id, photo.file.size * ratio);
+      const transferred = [...sent.values()].reduce((sum, bytes) => sum + bytes, 0);
+      saveStatus((received ? 'Saving photos to storage' : 'Uploading photos') + ' — ' + completed + ' of ' + pending.length + ' saved',
+        photo.file.name + ' · ' + formatBytes(transferred) + ' / ' + formatBytes(totalBytes), received ? null : (totalBytes ? transferred / totalBytes * 100 : 0));
+      const tile = $('#photo-previews [data-photo-id="' + photo.id + '"]');
+      if (tile) tile.dataset.upload = received ? 'Saving…' : 'Uploading ' + Math.round(ratio * 100) + '%';
+    };
+    const worker = async () => {
+      while (cursor < pending.length) {
+        if (controller.signal.aborted) throw new DOMException('Saving stopped', 'AbortError');
+        const photo = pending[cursor++]; update(photo, 0);
+        await uploadPhoto(item.id, photo, controller.signal, ratio => update(photo, ratio), () => update(photo, 1, true));
+        photo.persisted = true; completed++;
+        const tile = $('#photo-previews [data-photo-id="' + photo.id + '"]');
+        if (tile) tile.dataset.upload = 'Saved';
+      }
+    };
+    await Promise.all(Array.from({length: Math.min(3, pending.length)}, worker));
+    saveStatus('Finalizing gallery…', 'All photos received. Saving their order.');
     await saveOrder();
-    resetComposer(); showNotice(editing ? 'Gift updated.' : 'Gift added.'); await load();
-  } catch (error) { $('#composer-error').textContent = error instanceof TypeError ? 'Connection failed. Your form is kept; please try again.' : error.message; }
-  finally { setComposerBusy(false); }
+    resetComposer(); $('#save-progress').hidden = true; showNotice(editing ? 'Gift updated.' : 'Gift added.'); await load();
+  } catch (error) {
+    controller.abort();
+    const stopped = error.name === 'AbortError';
+    saveStatus(stopped ? 'Saving stopped' : 'Saving could not finish', (stopped ? '' : error.message + ' ') + 'Your form is kept. Some photos may already be saved; retry resumes without duplicates.');
+    $('#save-progress').dataset.state = 'error';
+    $('#composer-error').textContent = stopped ? 'Saving stopped. Your changes and selected files are kept. Press Save to resume.' : error instanceof TypeError ? 'Connection failed. Your form is kept; please try again.' : error.message;
+  } finally {
+    clearInterval(timer); saveController = null; $('#stop-saving').hidden = true;
+    for (const tile of document.querySelectorAll('.photo-tile')) delete tile.dataset.upload;
+    submitButton.textContent = form.dataset.id ? 'Save' : 'Add'; setComposerBusy(false);
+  }
 };
 async function deleteGift(id) {
   if (composerBusy || !id || !confirm('Delete this gift? Its reservation will also be removed.')) return;
@@ -453,7 +518,6 @@ field('links').onpaste = event => {
 };
 function addPhotos(files) {
   if (composerBusy) return;
-  if (composerPhotos.length + files.length > 20) { $('#composer-error').textContent = 'Use no more than 20 photos.'; return; }
   for (const file of files) composerPhotos.push({id: crypto.randomUUID(), file, url: URL.createObjectURL(file), persisted: false});
   renderPhotos();
 }

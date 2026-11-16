@@ -4,8 +4,8 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Wishlist</title>
-<link rel="stylesheet" href="/static/style.css?v=links-editor1">
-<script src="/static/app.js?v=links-editor1" type="module"></script>
+<link rel="stylesheet" href="/static/style.css?v=upload-progress1">
+<script src="/static/app.js?v=upload-progress1" type="module"></script>
 </head>
 <body>
 <main>
@@ -28,6 +28,12 @@
       <div class="composer-links"><div id="link-badges" aria-label="Added links"></div><input aria-label="Link" name="links" placeholder="Link" autocomplete="off" type="text"></div>
     </div>
     <div class="composer-actions"><button type="submit">Add</button><button id="cancel-edit" type="button" hidden>Cancel</button><button id="delete-item" class="danger" type="button" hidden>Delete gift</button></div>
+    <div id="save-progress" hidden>
+      <div class="save-progress-heading"><span class="save-spinner" aria-hidden="true"></span><span id="save-status" role="status" aria-live="polite"></span></div>
+      <progress id="save-meter" max="100" aria-label="Photo upload progress"></progress>
+      <p id="save-detail"></p>
+      <div class="save-progress-actions"><span id="save-elapsed"></span><button id="stop-saving" type="button">Stop saving</button></div>
+    </div>
     <p id="composer-error" role="alert"></p>
   </form>
   <p id="empty" role="status" hidden></p>

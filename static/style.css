@@ -142,3 +142,14 @@ body[data-hc-zoom-active] .medium-zoom-overlay{z-index:1000}
 }
 
 .gift button:focus-visible,.gift .product-photo:focus-visible{outline-offset:-2px}
+#save-progress{order:-1;grid-column:1/-1;padding:12px 14px;background:#f7f7f7;border:1px solid #ddd;border-radius:5px;font:12px/1.5 'Courier New',monospace;min-width:0}
+.save-progress-heading{display:flex;align-items:center;gap:8px;font-weight:bold}
+.save-spinner{flex:none;width:13px;height:13px;border:2px solid #ccc;border-top-color:#333;border-radius:50%;animation:saving-spin .8s linear infinite}
+#save-meter{display:block;width:100%;height:7px;margin:10px 0;accent-color:#333}
+#save-detail{margin:0;overflow-wrap:anywhere;color:#666}
+.save-progress-actions{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:8px;color:#777}
+#stop-saving{font:11px/1.4 'Courier New',monospace;padding:4px 8px}
+#save-progress[data-state=error] .save-spinner{animation:none;border-color:#a55}
+.photo-tile[data-upload]::after{content:attr(data-upload);position:absolute;bottom:0;left:0;right:0;background:#000a;color:#fff;padding:3px 1px;text-align:center;font:9px/1.3 'Courier New',monospace;pointer-events:none}
+@keyframes saving-spin{to{transform:rotate(360deg)}}
+@media(prefers-reduced-motion:reduce){.save-spinner{animation:none}}

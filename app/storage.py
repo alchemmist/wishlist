@@ -1,7 +1,8 @@
 import io
 import logging
+import shutil
+import struct
 import uuid
-import warnings
 from pathlib import Path
 from urllib.parse import quote
 
@@ -10,7 +11,7 @@ from botocore.client import Config
 from botocore.exceptions import ClientError
 from PIL import Image, UnidentifiedImageError
 
-Image.MAX_IMAGE_PIXELS = 25_000_000
+Image.MAX_IMAGE_PIXELS = None
 logger = logging.getLogger(__name__)
 
 
@@ -33,33 +34,50 @@ class Store:
             # Bucket provisioning belongs to infrastructure, not app startup.
 
     def put(self, username: str, data: bytes, content_type: str) -> str:
+        return self.put_file(username, io.BytesIO(data), content_type)
+
+    def put_file(self, username: str, stream, content_type: str) -> str:
+        """Validate a spooled file and transfer without buffering the full photo in RAM."""
         suffix, content_type = _image_type(content_type)
         try:
-            with warnings.catch_warnings():
-                warnings.simplefilter("error", Image.DecompressionBombWarning)
-                with Image.open(io.BytesIO(data)) as image:
-                    actual = Image.MIME.get(image.format)
-                    if actual != content_type or image.width * image.height > Image.MAX_IMAGE_PIXELS:
-                        raise ValueError("Unsupported image or image exceeds 25 megapixels")
+            stream.seek(0)
+            if content_type == "image/webp":
+                _verify_webp(stream)
+            else:
+                with Image.open(stream) as image:
+                    if Image.MIME.get(image.format) != content_type:
+                        raise ValueError("Choose a valid JPEG, PNG, WebP or GIF image")
+                    # Verify the container without decoding an unbounded pixel array.
                     image.verify()
-                with Image.open(io.BytesIO(data)) as image:
-                    image.load()
-        except (UnidentifiedImageError, OSError, SyntaxError, Image.DecompressionBombError, Image.DecompressionBombWarning) as exc:
+        except (UnidentifiedImageError, OSError, SyntaxError) as exc:
             raise ValueError("Choose a valid JPEG, PNG, WebP or GIF image") from exc
         if content_type not in {"image/jpeg", "image/png", "image/webp", "image/gif"}:
             raise ValueError("Choose a JPEG, PNG, WebP or GIF image")
+        stream.seek(0, 2)
+        size = stream.tell()
+        stream.seek(0)
         key = f"{username}/{uuid.uuid4().hex}{suffix}"
         if not self._safe_key(key):
             raise ValueError("Invalid image owner")
         if self.client:
-            self.client.put_object(Bucket=self.bucket, Key=key, Body=data, ContentType=content_type)
+            if size < 8 * 1024 * 1024:
+                self.client.put_object(Bucket=self.bucket, Key=key, Body=stream.read(), ContentType=content_type)
+            else:
+                from boto3.s3.transfer import TransferConfig
+                self.client.upload_fileobj(stream, self.bucket, key, ExtraArgs={"ContentType": content_type},
+                                           Config=TransferConfig(use_threads=False))
         else:
             root = (self.data_dir / "media").resolve()
             path = (root / key).resolve()
             if not path.is_relative_to(root):
                 raise ValueError("Invalid image path")
             path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_bytes(data)
+            try:
+                with path.open("wb") as target:
+                    shutil.copyfileobj(stream, target, length=1024 * 1024)
+            except Exception:
+                path.unlink(missing_ok=True)
+                raise
         return key
 
     def url(self, key: str | None) -> str | None:
@@ -69,16 +87,12 @@ class Store:
             return f"{self.public_base}/{quote(key, safe='/')}"
         return f"/media/{quote(key, safe='/')}"
 
-    def read(self, key: str) -> bytes | None:
+    def open(self, key: str):
         if not self._safe_key(key):
             return None
         if self.client:
             try:
-                body = self.client.get_object(Bucket=self.bucket, Key=key)["Body"]
-                try:
-                    return body.read()
-                finally:
-                    body.close()
+                return self.client.get_object(Bucket=self.bucket, Key=key)["Body"]
             except ClientError as exc:
                 if exc.response["Error"]["Code"] in {"NoSuchKey", "404", "NotFound"}:
                     return None
@@ -87,7 +101,16 @@ class Store:
         path = (root / key).resolve()
         if not path.is_relative_to(root):
             return None
-        return path.read_bytes() if path.is_file() else None
+        return path.open('rb') if path.is_file() else None
+
+    def read(self, key: str) -> bytes | None:
+        body = self.open(key)
+        if body is None:
+            return None
+        try:
+            return body.read()
+        finally:
+            body.close()
 
     @staticmethod
     def _safe_key(key: str) -> bool:
@@ -127,3 +150,34 @@ _TYPES = {
 
 def _image_type(content_type: str) -> tuple[str, str]:
     return _TYPES.get((content_type or "").split(";", 1)[0].strip().lower(), (".bin", "application/octet-stream"))
+
+
+def _verify_webp(stream):
+    """Validate RIFF/chunk boundaries without Pillow's full-file WebP buffer."""
+    stream.seek(0, 2)
+    size = stream.tell()
+    stream.seek(0)
+    header = stream.read(12)
+    if len(header) != 12 or header[:4] != b'RIFF' or header[8:] != b'WEBP':
+        raise ValueError('Choose a valid WebP image')
+    end = struct.unpack('<I', header[4:8])[0] + 8
+    if end > size or end < 20:
+        raise ValueError('Truncated WebP image')
+    image_found = False
+    while stream.tell() < end:
+        chunk = stream.read(8)
+        if len(chunk) != 8:
+            raise ValueError('Truncated WebP chunk')
+        length = struct.unpack('<I', chunk[4:])[0]
+        next_chunk = stream.tell() + length + (length % 2)
+        if next_chunk > end:
+            raise ValueError('Truncated WebP chunk')
+        if chunk[:4] in {b'VP8 ', b'VP8L', b'VP8X'}:
+            sample = stream.read(min(10, length))
+            valid = (chunk[:4] == b'VP8 ' and len(sample) >= 10 and sample[3:6] == b'\x9d\x01\x2a') or (chunk[:4] == b'VP8L' and len(sample) >= 5 and sample[0] == 47) or (chunk[:4] == b'VP8X' and length == 10)
+            if not valid:
+                raise ValueError('Invalid WebP image header')
+            image_found = True
+        stream.seek(next_chunk)
+    if not image_found or stream.tell() != end:
+        raise ValueError('Invalid WebP image')

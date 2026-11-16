@@ -153,7 +153,7 @@ test('network failure keeps editor data; repeated submit creates one item', asyn
   await expect(page.locator('#composer [type=submit]')).toBeEnabled();
 });
 
-test('invalid links, oversized photo and invalid image show recoverable errors', async ({page}) => {
+test('invalid links and invalid image show recoverable errors', async ({page}) => {
   await signIn(page);
   await page.getByRole('textbox', {name: 'Title', exact: true}).fill('Validation');
   await page.getByRole('textbox', {name: 'Link', exact: true}).fill('javascript:alert(1)');
@@ -161,11 +161,6 @@ test('invalid links, oversized photo and invalid image show recoverable errors',
   await expect(page.locator('#composer-error')).toContainText('http://');
   await expect(page.locator('.gift')).toHaveCount(0);
   await page.getByRole('textbox', {name: 'Link', exact: true}).fill('');
-  await page.getByLabel('Photo', {exact: true}).setInputFiles({name: 'big.png', mimeType: 'image/png', buffer: Buffer.alloc(8000001)});
-  await page.getByRole('button', {name: 'Add', exact: true}).click();
-  await expect(page.locator('#composer-error')).toHaveText('Photo must be under 8 MB.');
-  await page.locator('.photo-tile').first().hover();
-  await page.getByRole('button', {name: 'Remove photo 1', exact: true}).click();
   await page.getByLabel('Photo', {exact: true}).setInputFiles({name: 'fake.png', mimeType: 'image/png', buffer: Buffer.from('not an image')});
   await page.getByRole('button', {name: 'Add', exact: true}).click();
   await expect(page.locator('#composer-error')).toContainText('Gift saved, but the photo');
@@ -419,7 +414,7 @@ test('partial multi-photo upload with a lost response retries without duplicates
   expect(attempts).toBe(2);
   const after = (await (await page.request.get('/api/wishlists/' + user)).json()).items;
   expect(after).toHaveLength(1);
-  expect(after[0].photos).toEqual(before.photos);
+  expect([...after[0].photos].sort((a, b) => a.id.localeCompare(b.id))).toEqual([...before.photos].sort((a, b) => a.id.localeCompare(b.id)));
 });
 
 test('marketplace photo stories fill the row, track hover zones, loop and zoom the selected photo', async ({page}) => {
@@ -589,4 +584,52 @@ test('Enter turns links into left badges, narrows input, edits/removes and prese
   await expect(page.locator('#composer [type=submit]')).toHaveText('Add');
   item = (await (await page.request.get('/api/wishlists/' + username)).json()).items[0];
   expect(item.links).toEqual(['https://ozon.ru/product/changed']);
+});
+
+test('editing many photos has visible progress and elapsed time; over 20 photos and over 9 MB save successfully', async ({page}) => {
+  const username = await signIn(page); await addGift(page, 'Progress gallery', true);
+  await page.getByRole('button', {name: 'Edit Progress gallery', exact: true}).click();
+  const files = Array.from({length: 26}, (_, index) => ({...photo, name: 'photo-' + index + '.webp'}));
+  files[25] = {...photo, name: 'large.webp', buffer: Buffer.concat([photo.buffer, Buffer.alloc(9_000_001)])};
+  await page.getByLabel('Photo', {exact: true}).setInputFiles(files);
+  await expect(page.locator('.photo-tile')).toHaveCount(27);
+  let release; const gate = new Promise(resolve => { release = resolve; });
+  let activeRequests = 0;
+  await page.route('**/api/items/*/images/*', async route => { activeRequests++; await gate; await route.continue(); });
+  await page.getByRole('button', {name: 'Save', exact: true}).click();
+  await expect(page.locator('#save-progress')).toBeVisible();
+  await expect(page.locator('#save-progress')).toBeInViewport();
+  await expect(page.locator('#composer')).toHaveAttribute('aria-busy', 'true');
+  await expect(page.locator('#composer [type=submit]')).toHaveText('Saving…');
+  await expect(page.locator('#save-status')).toContainText('0 of 26');
+  await expect(page.locator('#save-elapsed')).toHaveText(/Elapsed 0:0[1-9]/);
+  expect(activeRequests).toBe(3);
+  await expect(page.getByRole('button', {name: 'Stop saving', exact: true})).toBeEnabled();
+  release();
+  await expect(page.locator('#save-progress')).toBeHidden({timeout: 20000});
+  await expect(page.locator('#notice')).toContainText('Gift updated');
+  await expect(page.locator('#composer [type=submit]')).toBeEnabled();
+  const items = (await (await page.request.get('/api/wishlists/' + username)).json()).items;
+  expect(items).toHaveLength(1); expect(items[0].photos).toHaveLength(27);
+});
+
+test('editing upload can be stopped and resumed without losing selected files or duplicating the gift', async ({page}) => {
+  const username = await signIn(page); await addGift(page, 'Stop gallery', true);
+  await page.getByRole('button', {name: 'Edit Stop gallery', exact: true}).click();
+  await page.getByLabel('Photo', {exact: true}).setInputFiles(Array.from({length: 4}, (_, index) => ({...photo, name: 'pending-' + index + '.webp'})));
+  let release; const gate = new Promise(resolve => { release = resolve; });
+  await page.route('**/api/items/*/images/*', async route => { await gate; await route.continue().catch(() => {}); });
+  await page.getByRole('button', {name: 'Save', exact: true}).click();
+  await expect(page.locator('#save-status')).toContainText('0 of 4');
+  await page.getByRole('button', {name: 'Stop saving', exact: true}).click();
+  await expect(page.locator('#save-status')).toHaveText('Saving stopped');
+  await expect(page.locator('#composer [type=submit]')).toHaveText('Save');
+  await expect(page.locator('#composer [type=submit]')).toBeEnabled();
+  await expect(page.locator('.photo-tile')).toHaveCount(5);
+  await expect(page.getByRole('textbox', {name: 'Title', exact: true})).toHaveValue('Stop gallery');
+  release(); await page.unroute('**/api/items/*/images/*');
+  await page.getByRole('button', {name: 'Save', exact: true}).click();
+  await expect(page.locator('#save-progress')).toBeHidden();
+  const items = (await (await page.request.get('/api/wishlists/' + username)).json()).items;
+  expect(items).toHaveLength(1); expect(items[0].photos).toHaveLength(5);
 });

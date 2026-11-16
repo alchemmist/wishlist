@@ -130,11 +130,11 @@ def test_gallery_ownership_and_order_validation(http):
 def test_gallery_limit_and_item_deletion_cleanup(http):
     from app.main import store
     item_id = http.post('/api/wishlists/tester/items', json={'title': 'Limit'}).json()['id']
-    for _ in range(20):
+    for _ in range(25):
         assert gallery_upload(http, item_id).status_code == 200
-    assert gallery_upload(http, item_id).status_code == 409
+    assert gallery_upload(http, item_id).status_code == 200
     keys = [row[0] for row in db.execute('SELECT image_key FROM item_images WHERE item_id = ?', (item_id,))]
-    assert len(keys) == 20
+    assert len(keys) == 26
     assert http.delete(f'/api/items/{item_id}').status_code == 204
     assert not db.execute('SELECT 1 FROM item_images').fetchone()
     assert all(store.read(key) is None for key in keys)
@@ -167,3 +167,56 @@ def test_gallery_parallel_retries_do_not_duplicate_photos(http):
     assert all(response.status_code == 200 for response in responses)
     assert len({response.json()['url'] for response in responses}) == 1
     assert db.execute('SELECT COUNT(*) FROM item_images WHERE item_id = ?', (item_id,)).fetchone()[0] == 1
+
+
+def test_large_photo_stream_does_not_require_full_buffer(tmp_path):
+    import io
+    from PIL import Image
+    output = io.BytesIO()
+    Image.new('RGB', (10, 10), 'blue').save(output, 'PNG')
+    payload = output.getvalue() + b'\0' * 10_000_000
+    class BoundedStream(io.BytesIO):
+        def read(self, size=-1):
+            assert 0 <= size <= 1024 * 1024, 'Must not buffer the entire large file'
+            return super().read(size)
+    storage = Store(tmp_path, '', '', '', '', '')
+    key = storage.put_file('1', BoundedStream(payload), 'image/png')
+    assert (tmp_path / 'media' / key).stat().st_size == len(payload)
+
+
+def test_large_pixel_dimensions_are_not_rejected(tmp_path):
+    import io
+    from PIL import Image
+    output = io.BytesIO()
+    Image.new('1', (6000, 5000)).save(output, 'PNG')
+    storage = Store(tmp_path, '', '', '', '', '')
+    assert storage.put('1', output.getvalue(), 'image/png')
+
+
+def test_large_gallery_order_has_no_json_size_or_count_limit(http):
+    from uuid import uuid4
+    item = http.post('/api/wishlists/tester/items', json={'title': 'Large gallery'}).json()['id']
+    ids = [str(uuid4()) for _ in range(7000)]
+    db.executemany('INSERT INTO item_images VALUES (?, ?, ?, ?)', [(photo_id, item, '1/' + photo_id + '.png', index) for index, photo_id in enumerate(ids)])
+    db.commit()
+    response = http.patch(f'/api/items/{item}/images', json={'ids': ids[::-1]})
+    assert response.status_code == 200
+    assert [photo['id'] for photo in response.json()['photos']] == ids[::-1]
+
+
+def test_large_s3_upload_uses_managed_stream(tmp_path):
+    import io
+    from unittest.mock import Mock
+    from PIL import Image
+    output = io.BytesIO()
+    Image.new('RGB', (10, 10)).save(output, 'PNG')
+    payload = output.getvalue() + b'\0' * 9_000_000
+    storage = Store(tmp_path, 'https://s3.invalid', 'wishlist', 'test', 'test', '')
+    transfer = Mock()
+    storage.client.upload_fileobj = transfer
+    storage.put_file('1', io.BytesIO(payload), 'image/png')
+    transfer.assert_called_once()
+    args, kwargs = transfer.call_args
+    assert hasattr(args[0], 'read') and args[1] == 'wishlist'
+    assert kwargs['ExtraArgs'] == {'ContentType': 'image/png'}
+    assert kwargs['Config'].use_threads is False

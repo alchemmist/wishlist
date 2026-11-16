@@ -77,7 +77,8 @@ procedure and the explicit required-check synchronization step.
 
 ## Photo galleries
 
-Each gift supports up to 20 JPEG/PNG/WebP/GIF photos (8 MB each). Select several
+Each gift supports JPEG/PNG/WebP/GIF photos without application-level count,
+file-byte or pixel-count caps. Select several
 files at once or add more in subsequent selections. In the editor, drag the
 photo itself to reorder, with no handles or movement buttons. The first photo
 is the cover. A round trash button appears in the upper-right corner on
@@ -108,3 +109,15 @@ an empty input to edit the last URL. Add/Save includes a valid pending URL too.
 Photo, title and action controls share the same top edge on desktop and mobile;
 focus outlines stay within that edge. Upload limits are still enforced without
 permanent explanatory text in the editor.
+
+
+Saving shows a visible status panel above the editor: current stage, transfer
+progress/bytes, completed photo count, elapsed time, and thumbnail states. Up to
+three files transfer concurrently (a concurrency bound, not a photo-count cap).
+Stop saving aborts outstanding browser requests without discarding selected
+files; Save retries reconcile already-stored photo IDs and do not duplicate them.
+Metadata or photos already committed before stopping are not rolled back.
+Large files spool to disk and stream to storage; S3 multipart transfer and media
+responses avoid buffering whole large files in application memory. Validation
+checks supported image/container structure, not an unbounded decoded pixel array.
+Actual disk, browser, network and storage capacities still apply.
