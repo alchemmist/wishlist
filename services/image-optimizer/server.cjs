@@ -23,7 +23,7 @@ function createServer() {
       // Do not enable SVG/PDF or arbitrary libvips loaders via this API.
       if (!['jpeg','png','webp','gif'].includes(metadata.format)) { res.writeHead(415).end(); return; }
       if (req.url === '/preview') image = image.resize({width: 480, height: 960, fit: 'inside', withoutEnlargement: true});
-      await image.webp({lossless: true, effort: 4}).toFile(output);
+      await image.webp(req.url === '/master' ? {lossless: true, effort: 4} : {quality: 90, alphaQuality: 100, effort: 4}).toFile(output);
       const info = await stat(output);
       res.writeHead(200, {'Content-Type': 'image/webp', 'Content-Length': info.size, 'Cache-Control': 'no-store', 'X-Image-Process-Ms': (performance.now() - started).toFixed(2)});
       await pipeline(createReadStream(output), res);

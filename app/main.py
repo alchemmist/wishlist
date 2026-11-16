@@ -559,7 +559,7 @@ def media(key: str, request: Request, preview: bool = False):
         raise HTTPException(503, "Photo is temporarily unavailable", headers={"Cache-Control": "no-store", "Retry-After": "2"})
     if path is None:
         raise HTTPException(404)
-    variant = 'preview-v1:' if preview and store.optimizer else 'master:'
+    variant = 'preview-v2:' if preview and store.optimizer else 'master:'
     etag = '"' + hashlib.sha256((variant + key).encode()).hexdigest() + '"'
     headers = {"X-Content-Type-Options": "nosniff", "Cache-Control": "public, max-age=31536000, immutable", "ETag": etag}
     if etag in request.headers.get('if-none-match', '').split(', ') or request.headers.get('if-none-match') == '*':

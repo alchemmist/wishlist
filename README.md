@@ -150,7 +150,8 @@ Grafana dashboard are maintained in the sibling Homelab repository.
 the same image (`node /opt/image-optimizer/server.cjs`). It accepts binary POST
 `/master` and `/preview`, not URLs. New originals are validated, converted to
 full-resolution **lossless WebP** plus a separate <=480×960 preview, then only
-those two derivatives are stored in S3. Metadata is stripped except ICC; EXIF
+those two derivatives are stored in S3. The display-only preview uses WebP q90
+(alpha quality100); this does not affect the separate lossless zoom master. Metadata is stripped except ICC; EXIF
 orientation is applied. Animation/alpha are retained. JPEG→lossless WebP can grow:
 we do not promise lossless conversion always reduces bytes. Preview downscaling
 is display-only; zoom fetches the full master. A failed optimizer fails the

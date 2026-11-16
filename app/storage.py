@@ -108,11 +108,11 @@ class Store:
 
     @staticmethod
     def preview_key(key):
-        return '_previews/' + key + '.webp'
+        return '_previews/v2/' + key + '.webp'
 
     def preview_url(self, key):
         # Always same-origin: no public bucket bypass of private preview logic.
-        return '/media/' + quote(key, safe='/') + '?preview=1' if key and self.optimizer else self.url(key)
+        return '/media/' + quote(key, safe='/') + '?preview=1&v=2' if key and self.optimizer else self.url(key)
 
     @measured('media.prepare')
     def media_file(self, key, preview=False):
@@ -189,6 +189,7 @@ class Store:
         self.cache.delete(key)
         if self.optimizer and not key.startswith('_previews/'):
             self.delete(self.preview_key(key))
+            self.delete('_previews/' + key + '.webp')  # Previous preview version; safe if absent.
         try:
             if self.client:
                 self.client.delete_object(Bucket=self.bucket, Key=key)

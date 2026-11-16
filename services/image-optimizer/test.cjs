@@ -14,6 +14,7 @@ test('lossless master, alpha, sizes, previews and no URL fetching', async () => 
     const meta = await sharp(master).metadata(); assert.equal(meta.width,1000); assert.equal(meta.height,2000); assert.equal(meta.format,'webp');
     assert.deepEqual(await sharp(master).raw().toBuffer(),await sharp(input).raw().toBuffer());
     const thumb = await sharp(preview).metadata(); assert.equal(thumb.width,480); assert.equal(thumb.height,960);
+    assert.ok(preview.length < input.length); // Display derivative, not the pixel-perfect master.
     const oriented = await sharp({create:{width:40,height:20,channels:3,background:'red'}}).jpeg().withMetadata({orientation:6}).toBuffer();
     const orientedResponse = await fetch(base + '/master',{method:'POST',body:oriented});
     const orientedMaster = Buffer.from(await orientedResponse.arrayBuffer());
