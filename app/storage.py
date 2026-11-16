@@ -1,7 +1,6 @@
 import io
 import logging
 import os
-import tempfile
 from contextlib import closing
 import shutil
 import struct
@@ -126,8 +125,10 @@ class Store:
             source_key = self.preview_key(key) if variant == 'preview' else key
             body = self.open(source_key)
             if body is not None:
-                with closing(body), operation('s3.download'):
-                    return self.cache.save(key, variant, body)
+                with closing(body), operation('s3.download') as download:
+                    path = self.cache.save(key, variant, body)
+                    download.set_attribute('storage.download.bytes', path.stat().st_size)
+                    return path
             if variant != 'preview': return None
             # Legacy originals are never deleted/re-written. Derive/cache a
             # preview on demand and reuse the downloaded original for zoom.
@@ -135,8 +136,9 @@ class Store:
             if not original.is_file():
                 body = self.open(key)
                 if body is None: return None
-                with closing(body), operation('s3.download'):
+                with closing(body), operation('s3.download') as download:
                     original = self.cache.save(key, 'master', body)
+                    download.set_attribute('storage.download.bytes', original.stat().st_size)
             with original.open('rb') as source, self.optimizer.convert(source, 'preview') as result:
                 return self.cache.save(key, 'preview', result)
 

@@ -113,7 +113,7 @@ permanent explanatory text in the editor.
 
 Saving shows a floating activity island at the left edge, vertically centered: current stage, transfer
 progress/bytes, completed photo count, elapsed time, and thumbnail states. Up to
-three files transfer concurrently (a concurrency bound, not a photo-count cap).
+all files start their requests concurrently (no application upload worker cap).
 Stop saving aborts outstanding browser requests without discarding selected
 files; Save retries reconcile already-stored photo IDs and do not duplicate them.
 Metadata or photos already committed before stopping are not rolled back.
