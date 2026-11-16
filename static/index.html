@@ -4,8 +4,8 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Wishlist</title>
-<link rel="stylesheet" href="/static/style.css?v=stories1">
-<script src="/static/app.js?v=stories1" type="module"></script>
+<link rel="stylesheet" href="/static/style.css?v=card-editor1">
+<script src="/static/app.js?v=card-editor1" type="module"></script>
 </head>
 <body>
 <main>
@@ -13,13 +13,21 @@
   <p id="owner-name" class="owner-name"></p>
   <p id="notice" role="status" aria-live="polite"></p>
   <form id="composer" aria-label="Gift editor" hidden>
-    <input aria-label="Title" name="title" placeholder="Title" required maxlength="120">
-    <textarea aria-label="Description" name="description" placeholder="Description" maxlength="400"></textarea>
-    <input aria-label="Price" name="price" placeholder="Price" maxlength="40">
-    <textarea aria-label="Links, one per line" name="links" placeholder="Links, one per line"></textarea>
-    <label class="photo-field">Photo<input name="image" type="file" multiple accept="image/jpeg,image/png,image/webp,image/gif"></label>
-    <p class="photo-help">Up to 20 photos, 8 MB each. Drag to reorder; the first photo is the cover.</p>
-    <div id="photo-previews" aria-label="Photo order" role="list"></div>
+    <div class="composer-media">
+      <label class="photo-field" title="Add photos">
+        <input aria-label="Photo" name="image" type="file" multiple accept="image/jpeg,image/png,image/webp,image/gif" aria-describedby="photo-help">
+        <span class="photo-plus" aria-hidden="true">+</span>
+        <span class="photo-label">Add photos</span>
+      </label>
+      <div id="photo-previews" aria-label="Photo order" role="list"></div>
+    </div>
+    <div class="composer-content">
+      <input aria-label="Title" name="title" placeholder="Title" required maxlength="120">
+      <input aria-label="Price" name="price" placeholder="Price" maxlength="40">
+      <textarea aria-label="Description" name="description" placeholder="Description" maxlength="400" rows="2"></textarea>
+      <textarea aria-label="Links, one per line" name="links" placeholder="Links, one per line" rows="1"></textarea>
+      <p id="photo-help" class="photo-help">Up to 20 photos · 8 MB each</p>
+    </div>
     <div class="composer-actions"><button type="submit">Add</button><button id="cancel-edit" type="button" hidden>Cancel</button><button id="delete-item" class="danger" type="button" hidden>Delete gift</button></div>
     <p id="composer-error" role="alert"></p>
   </form>

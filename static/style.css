@@ -15,15 +15,6 @@ textarea{min-height:85px;resize:vertical}
 .owner-name:empty,#notice:empty,#composer-error:empty,#name-error:empty{display:none}
 #notice,#empty{font:13px/1.6 'Courier New',monospace;color:#555}
 #notice{padding:10px 0}
-#composer{display:grid;gap:10px;max-width:520px;margin:0 0 26px;padding:20px;border:1px solid #ddd;border-radius:6px}
-#composer input,#composer textarea,#composer button{font:14px/1.5 'Courier New',monospace}
-.photo-field{display:block;font:12px/1.5 'Courier New',monospace;color:#555}
-.photo-field input{margin-top:6px;padding:8px}
-#photo-preview{width:96px;height:96px;object-fit:contain;border-radius:4px;background:#f6f6f6}
-.composer-actions{display:flex;flex-wrap:wrap;gap:8px}
-.composer-actions button{min-width:80px}
-.composer-actions button[type=submit]{background:#222;color:#fff;border-color:#222}
-.composer-actions button[type=submit]:hover{background:#444}
 button.danger{color:#a22;margin-left:auto}
 #composer-error,#name-error{font:12px/1.6 'Courier New',monospace;color:#a22;margin:0;overflow-wrap:anywhere}
 .gift{display:grid;grid-template-columns:160px minmax(0,1fr) 78px;gap:25px;padding:26px 0;border-bottom:1px solid #e4e4e4}
@@ -67,7 +58,7 @@ button.danger{color:#a22;margin-left:auto}
 .account-avatar img{display:block;width:100%;height:100%;object-fit:cover}
 body[data-hc-zoom-active] .medium-zoom-overlay{z-index:1000}
 .hc-zoom-image.medium-zoom-image--opened{z-index:1001;border-radius:0}
-@media(max-width:600px){main{padding:26px 22px 80px}h1{font-size:38px;margin:40px 0 12px}.gift{grid-template-columns:96px minmax(0,1fr) 52px;gap:12px}.product-photo{width:96px;height:112px}.gift h2{font-size:17px}.gift .gift-description{font-size:13px}.reservation-status{font-size:9px}#composer{padding:14px}}
+@media(max-width:600px){main{padding:26px 22px 80px}h1{font-size:38px;margin:40px 0 12px}.gift{grid-template-columns:96px minmax(0,1fr) 52px;gap:12px}.product-photo{width:96px;height:112px}.gift h2{font-size:17px}.gift .gift-description{font-size:13px}.reservation-status{font-size:9px}}
 @media(max-width:480px){main{padding-inline:18px}.gift{grid-template-columns:76px minmax(0,1fr);gap:14px}.product-photo{width:76px;height:90px}.reservation-control{grid-column:2;flex-direction:row;justify-content:flex-start;padding:0}.gift.no-photo{grid-template-columns:minmax(0,1fr)}.no-photo .reservation-control{grid-column:1}}
 @media(prefers-reduced-motion:reduce){.reservation-switch,.switch-thumb{transition:none!important}.medium-zoom-image,.medium-zoom-overlay{transition-duration:.001s!important}}
 .gift-title{display:flex;align-items:baseline;gap:2px}.gift-title h2{flex:1;min-width:0}.gift-title .edit-item{flex:none;margin:0}
@@ -96,3 +87,32 @@ body[data-hc-zoom-active] .medium-zoom-overlay{z-index:1000}
 @media(max-width:480px){.drawing{grid-row:1 / span 2;min-height:96px}}
 @media(hover:none){.photo-story-bars{opacity:1}}
 @media(prefers-reduced-motion:reduce){.photo-story-bars{transition:none}}
+
+/* The composer uses the same photo / content / action columns as a saved gift. */
+#composer{display:grid;grid-template-columns:160px minmax(0,1fr) 78px;gap:25px;max-width:none;margin:0 0 10px;padding:26px 0;border:0;border-bottom:1px solid #e4e4e4;border-radius:0;align-items:start}
+.composer-media,.composer-content{min-width:0}
+.photo-field{position:relative;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;width:100%;aspect-ratio:1;border:1px dashed #bdbdbd;border-radius:4px;cursor:pointer;color:#999;background:#fafafa}
+.photo-field:hover,.photo-field:focus-within,.photo-field.is-dragover{color:#555;border-color:#777;background:#f5f5f5}
+.photo-field:focus-within{outline:2px solid #2459bd;outline-offset:3px}
+.photo-field input{position:absolute;width:1px;height:1px;margin:0;padding:0;opacity:0;overflow:hidden}
+.photo-plus{font:normal 36px/1 'Courier New',monospace}
+.photo-label{font:11px/1.4 'Courier New',monospace;text-align:center}
+#composer .composer-content input,#composer .composer-content textarea{display:block;width:100%;padding:0;border:0;border-radius:0;background:transparent;box-shadow:none;resize:none;overflow:hidden;min-height:0}
+#composer .composer-content input::placeholder,#composer .composer-content textarea::placeholder{color:#aaa;opacity:1}
+#composer input[name=title]{font:bold 20px/1.35 'Courier New',monospace;margin:0 0 7px}
+#composer input[name=price]{font:14px/1.5 'Courier New',monospace;margin:8px 0}
+#composer textarea[name=description]{font:13px/1.65 Georgia,serif;color:#666;margin:6px 0 12px}
+#composer textarea[name=links]{font:12px/1.5 'Courier New',monospace;margin:12px 0}
+#composer .photo-help{font:10px/1.5 'Courier New',monospace;color:#aaa;margin:10px 0 0}
+.composer-actions{display:flex;flex-direction:column;align-items:stretch;gap:8px;padding-top:4px;min-width:0}
+#composer .composer-actions button{font:12px/1.5 'Courier New',monospace;padding:6px 5px;min-width:0;border-radius:4px}
+.composer-actions button[type=submit]{background:#222;color:#fff;border-color:#222}
+.composer-actions button[type=submit]:hover{background:#444}
+#composer-error{grid-column:2/-1}
+#photo-previews{display:grid;grid-template-columns:repeat(auto-fit,minmax(44px,1fr));gap:6px;margin-top:8px}
+#photo-previews:empty{display:none}
+#photo-previews .photo-tile{width:100%;aspect-ratio:1}
+#photo-previews .photo-tile img{width:100%;height:100%;object-fit:cover}
+#composer .photo-remove{width:24px;height:24px}
+@media(max-width:600px){#composer{grid-template-columns:96px minmax(0,1fr) 52px;gap:12px}#composer input[name=title]{font-size:17px}#composer .composer-actions button{font-size:11px}}
+@media(max-width:480px){#composer{grid-template-columns:76px minmax(0,1fr);gap:14px}.composer-media{grid-row:1/span 2}.composer-actions{grid-column:2;flex-direction:row;flex-wrap:wrap;padding:0}#composer .composer-actions button{padding:6px 10px}#composer-error{grid-column:1/-1}.photo-label{font-size:10px}}

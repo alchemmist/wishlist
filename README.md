@@ -93,3 +93,9 @@ selects the corresponding photo without clicking. Touch swipes and focused-photo
 Left/Right keys cycle through photos; clicking/Enter still zooms the selected
 photo. Owners can delete a gift directly with the trash icon next to its pencil
 (confirmation required).
+
+
+The top editor mirrors a saved card: a dashed photo picker/dropzone with a plus
+on the left, ordered miniatures underneath, borderless Title/Price/Description
+fields in the content column, and Add/Save in place of the reservation control.
+The same layout adapts to mobile; links remain editable below the description.

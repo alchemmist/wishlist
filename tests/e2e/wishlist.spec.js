@@ -482,3 +482,42 @@ test('owner deletes directly next to the pencil; guests cannot; cancellation and
   await expect(page.locator('.gift')).toHaveCount(0);
   await page.reload(); await expect(page.locator('.gift')).toHaveCount(0);
 });
+
+test('card-shaped composer aligns with saved cards, plus opens picker, drop appends miniatures and narrow layout fits', async ({page}) => {
+  await signIn(page); await addGift(page, 'Layout reference', true);
+  await expect(page.locator('#composer .photo-field')).toHaveCSS('border-top-style', 'dashed');
+  await expect(page.locator('#composer .photo-plus')).toHaveText('+');
+  await expect(page.locator('#composer [role=switch]')).toHaveCount(0);
+  await expect(page.getByRole('textbox', {name: 'Title', exact: true})).toHaveAttribute('placeholder', 'Title');
+  await expect(page.getByRole('textbox', {name: 'Price', exact: true})).toHaveAttribute('placeholder', 'Price');
+  await expect(page.getByRole('textbox', {name: 'Description', exact: true})).toHaveAttribute('placeholder', 'Description');
+  const [picker] = await Promise.all([page.waitForEvent('filechooser'), page.locator('.photo-field').click()]);
+  await picker.setFiles(photo);
+  await expect(page.locator('.photo-tile')).toHaveCount(1);
+  const transfer = await page.evaluateHandle(base64 => {
+    const transfer = new DataTransfer();
+    transfer.items.add(new File([Uint8Array.from(atob(base64), char => char.charCodeAt(0))], 'dropped.webp', {type: 'image/webp'}));
+    return transfer;
+  }, photo.buffer.toString('base64'));
+  await page.locator('.photo-field').dispatchEvent('drop', {dataTransfer: transfer});
+  await transfer.dispose();
+  await expect(page.locator('.photo-tile')).toHaveCount(2);
+  for (const width of [page.viewportSize().width, 320]) {
+    await page.setViewportSize({width, height: 900});
+    const layout = await page.evaluate(() => {
+      const rect = selector => document.querySelector(selector).getBoundingClientRect();
+      return {
+        editorPhoto: rect('.composer-media').left, savedPhoto: rect('.gift .drawing').left,
+        editorText: rect('.composer-content').left, savedText: rect('.gift-content').left,
+        add: rect('.composer-actions').left, toggle: rect('.reservation-control').left,
+        photosTop: rect('#photo-previews').top, dropBottom: rect('.photo-field').bottom,
+        overflow: document.documentElement.scrollWidth > innerWidth,
+      };
+    });
+    expect(layout.editorPhoto).toBeCloseTo(layout.savedPhoto, 0);
+    expect(layout.editorText).toBeCloseTo(layout.savedText, 0);
+    expect(layout.add).toBeCloseTo(layout.toggle, 0);
+    expect(layout.photosTop).toBeGreaterThanOrEqual(layout.dropBottom);
+    expect(layout.overflow).toBe(false);
+  }
+});

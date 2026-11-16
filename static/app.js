@@ -342,7 +342,7 @@ function resetComposer() {
   form.reset(); delete form.dataset.id;
   clearPreview(); form.querySelector('[type=submit]').textContent = 'Add';
   for (const id of ['cancel-edit', 'delete-item']) $('#' + id).hidden = true;
-  $('#composer-error').textContent = '';
+  $('#composer-error').textContent = ''; resizeComposerText();
 }
 function setComposerBusy(busy) {
   composerBusy = busy;
@@ -408,12 +408,26 @@ async function deleteGift(id) {
   finally { setComposerBusy(false); }
 }
 $('#delete-item').onclick = () => deleteGift(form.dataset.id);
-field('image').onchange = () => {
-  const files = [...field('image').files]; field('image').value = '';
+function addPhotos(files) {
+  if (composerBusy) return;
   if (composerPhotos.length + files.length > 20) { $('#composer-error').textContent = 'Use no more than 20 photos.'; return; }
   for (const file of files) composerPhotos.push({id: crypto.randomUUID(), file, url: URL.createObjectURL(file), persisted: false});
   renderPhotos();
+}
+field('image').onchange = () => {
+  const files = [...field('image').files]; field('image').value = ''; addPhotos(files);
 };
+const photoDrop = $('.photo-field');
+photoDrop.ondragover = event => { event.preventDefault(); if (!composerBusy) photoDrop.classList.add('is-dragover'); };
+photoDrop.ondragleave = () => photoDrop.classList.remove('is-dragover');
+photoDrop.ondrop = event => { event.preventDefault(); photoDrop.classList.remove('is-dragover'); addPhotos([...event.dataTransfer.files]); };
+function resizeComposerText() {
+  for (const textarea of form.querySelectorAll('textarea')) {
+    textarea.style.height = 'auto'; textarea.style.height = textarea.scrollHeight + 'px';
+  }
+}
+form.addEventListener('input', resizeComposerText);
+addEventListener('resize', resizeComposerText);
 function startEdit(item) {
   closeReservation(); resetComposer(); form.hidden = false; form.dataset.id = item.id;
   for (const name of ['title', 'description', 'price']) field(name).value = item[name] || '';
@@ -421,6 +435,7 @@ function startEdit(item) {
   composerPhotos = (item.photos || []).map(photo => ({...photo, persisted: true})); renderPhotos();
   $('#cancel-edit').hidden = false; $('#delete-item').hidden = false;
   form.querySelector('[type=submit]').textContent = 'Save';
+  resizeComposerText();
   form.scrollIntoView({block: 'start'}); field('title').focus({preventScroll: true});
 }
 load();
