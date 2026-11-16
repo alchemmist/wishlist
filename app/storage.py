@@ -1,5 +1,8 @@
 import io
 import logging
+import os
+import tempfile
+from contextlib import closing
 import shutil
 import struct
 import uuid
@@ -22,6 +25,10 @@ class Store:
         self.bucket = bucket
         self.public_base = public_base.rstrip("/")
         self.client = None
+        from app.images import Optimizer, MediaCache
+        optimizer_url = os.environ.get('IMAGE_OPTIMIZER_URL', '')
+        self.optimizer = Optimizer(optimizer_url) if optimizer_url else None
+        self.cache = MediaCache(data_dir / 'media-cache')
         if any((endpoint, access, secret)) and not all((endpoint, access, secret, bucket)):
             raise RuntimeError("S3 requires endpoint, bucket, access key and secret key together")
         if endpoint and access and secret and bucket:
@@ -56,10 +63,25 @@ class Store:
                 raise ValueError("Choose a valid JPEG, PNG, WebP or GIF image") from exc
         if content_type not in {"image/jpeg", "image/png", "image/webp", "image/gif"}:
             raise ValueError("Choose a JPEG, PNG, WebP or GIF image")
+        if self.optimizer:
+            with self.optimizer.convert(stream, 'master') as master, self.optimizer.convert(master, 'preview') as preview:
+                key = self._persist(username, master, '.webp', 'image/webp')
+                try:
+                    self._persist(username, preview, '.webp', 'image/webp', key=self.preview_key(key))
+                except Exception:
+                    self.delete(key)
+                    raise
+                for variant, source in [('master', master), ('preview', preview)]:
+                    try: self.cache.save(key, variant, source)
+                    except OSError: logger.warning('Media cache write failed')
+                return key
+        return self._persist(username, stream, suffix, content_type)
+
+    def _persist(self, username, stream, suffix, content_type, key=None):
         stream.seek(0, 2)
         size = stream.tell()
         stream.seek(0)
-        key = f"{username}/{uuid.uuid4().hex}{suffix}"
+        key = key or f"{username}/{uuid.uuid4().hex}{suffix}"
         if not self._safe_key(key):
             raise ValueError("Invalid image owner")
         if self.client:
@@ -84,6 +106,39 @@ class Store:
                 path.unlink(missing_ok=True)
                 raise
         return key
+
+    @staticmethod
+    def preview_key(key):
+        return '_previews/' + key + '.webp'
+
+    def preview_url(self, key):
+        # Always same-origin: no public bucket bypass of private preview logic.
+        return '/media/' + quote(key, safe='/') + '?preview=1' if key and self.optimizer else self.url(key)
+
+    @measured('media.prepare')
+    def media_file(self, key, preview=False):
+        if not self._safe_key(key): return None
+        variant = 'preview' if preview and self.optimizer else 'master'
+        with self.cache.lock(key, variant), operation('media.cache') as span:
+            path = self.cache.path(key, variant)
+            span.set_attribute('media.cache.hit', path.is_file())
+            if path.is_file(): return path
+            source_key = self.preview_key(key) if variant == 'preview' else key
+            body = self.open(source_key)
+            if body is not None:
+                with closing(body), operation('s3.download'):
+                    return self.cache.save(key, variant, body)
+            if variant != 'preview': return None
+            # Legacy originals are never deleted/re-written. Derive/cache a
+            # preview on demand and reuse the downloaded original for zoom.
+            original = self.cache.path(key, 'master')
+            if not original.is_file():
+                body = self.open(key)
+                if body is None: return None
+                with closing(body), operation('s3.download'):
+                    original = self.cache.save(key, 'master', body)
+            with original.open('rb') as source, self.optimizer.convert(source, 'preview') as result:
+                return self.cache.save(key, 'preview', result)
 
     def url(self, key: str | None) -> str | None:
         if not key:
@@ -129,6 +184,9 @@ class Store:
     def delete(self, key: str) -> None:
         if not self._safe_key(key):
             return
+        self.cache.delete(key)
+        if self.optimizer and not key.startswith('_previews/'):
+            self.delete(self.preview_key(key))
         try:
             if self.client:
                 self.client.delete_object(Bucket=self.bucket, Key=key)

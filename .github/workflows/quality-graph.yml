@@ -43,7 +43,7 @@ jobs:
           adapter: exit-code
           report-path: ''
           command-outcome: ${{ steps.quality-command.outcome }}
-          graph-digest: 10187594b81c46307c7f497025a09d20b5843dc5327e6d9400b57e27f7ab1841
+          graph-digest: 320d6b018b783d110da5c5ee0627a5498dca418d233222d521c33c846821629e
           approval-findings: 'true'
           approval-files: 'false'
           approval-node: 'false'
@@ -97,7 +97,7 @@ jobs:
           adapter: exit-code
           report-path: ''
           command-outcome: ${{ steps.quality-command.outcome }}
-          graph-digest: 10187594b81c46307c7f497025a09d20b5843dc5327e6d9400b57e27f7ab1841
+          graph-digest: 320d6b018b783d110da5c5ee0627a5498dca418d233222d521c33c846821629e
           approval-findings: 'true'
           approval-files: 'false'
           approval-node: 'false'
@@ -149,7 +149,7 @@ jobs:
           adapter: exit-code
           report-path: ''
           command-outcome: ${{ steps.quality-command.outcome }}
-          graph-digest: 10187594b81c46307c7f497025a09d20b5843dc5327e6d9400b57e27f7ab1841
+          graph-digest: 320d6b018b783d110da5c5ee0627a5498dca418d233222d521c33c846821629e
           approval-findings: 'true'
           approval-files: 'false'
           approval-node: 'false'
@@ -206,7 +206,7 @@ jobs:
           adapter: exit-code
           report-path: ''
           command-outcome: ${{ steps.quality-command.outcome }}
-          graph-digest: 10187594b81c46307c7f497025a09d20b5843dc5327e6d9400b57e27f7ab1841
+          graph-digest: 320d6b018b783d110da5c5ee0627a5498dca418d233222d521c33c846821629e
           approval-findings: 'true'
           approval-files: 'false'
           approval-node: 'false'
@@ -226,6 +226,76 @@ jobs:
         run: exit "${EXIT_CODE:-2}"
     needs:
       - graph
+    timeout-minutes: 10
+  image-optimizer:
+    name: Sharp/libvips lossless optimizer and dependency audit
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: 'false'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          cache: pip
+          cache-dependency-path: requirements*.txt
+      - name: Install pinned Quality Graph toolchain
+        run: python -m pip install -r requirements-quality.txt
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci
+      - run: 'set -euo pipefail
+
+          mkdir -p reports
+
+          cd services/image-optimizer
+
+          npm ci
+
+          npm audit --audit-level=low
+
+          node --test --test-reporter=junit test.cjs > ../../reports/image-optimizer.xml
+
+          '
+        shell: bash
+        name: Run Sharp/libvips lossless optimizer and dependency audit
+        id: quality-command
+        continue-on-error: true
+      - name: Collect Sharp/libvips lossless optimizer and dependency audit result
+        id: quality-result
+        if: always()
+        uses: alchemmist/quality-graph@3b0cf7d8a33215d5a3bb5521b4e0e41c18e8cb7c
+        with:
+          operation: collect
+          node-id: image-optimizer
+          title: Sharp/libvips lossless optimizer and dependency audit
+          adapter: junit
+          report-path: reports/image-optimizer.xml
+          command-outcome: ${{ steps.quality-command.outcome }}
+          graph-digest: 320d6b018b783d110da5c5ee0627a5498dca418d233222d521c33c846821629e
+          approval-findings: 'false'
+          approval-files: 'false'
+          approval-node: 'false'
+      - name: Upload Sharp/libvips lossless optimizer and dependency audit result
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: quality-result-image-optimizer-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/quality-graph/image-optimizer.json
+          if-no-files-found: error
+          retention-days: 7
+      - name: Enforce Sharp/libvips lossless optimizer and dependency audit result
+        if: always()
+        shell: bash
+        env:
+          EXIT_CODE: ${{ steps.quality-result.outputs.exit-code }}
+        run: exit "${EXIT_CODE:-2}"
+    needs:
+      - javascript-syntax
     timeout-minutes: 10
   unit:
     name: API, concurrency, migrations and storage tests
@@ -260,7 +330,7 @@ jobs:
           adapter: junit
           report-path: reports/pytest.xml
           command-outcome: ${{ steps.quality-command.outcome }}
-          graph-digest: 10187594b81c46307c7f497025a09d20b5843dc5327e6d9400b57e27f7ab1841
+          graph-digest: 320d6b018b783d110da5c5ee0627a5498dca418d233222d521c33c846821629e
           approval-findings: 'false'
           approval-files: 'false'
           approval-node: 'false'
@@ -322,7 +392,7 @@ jobs:
           adapter: exit-code
           report-path: reports/python-audit.log
           command-outcome: ${{ steps.quality-command.outcome }}
-          graph-digest: 10187594b81c46307c7f497025a09d20b5843dc5327e6d9400b57e27f7ab1841
+          graph-digest: 320d6b018b783d110da5c5ee0627a5498dca418d233222d521c33c846821629e
           approval-findings: 'true'
           approval-files: 'false'
           approval-node: 'false'
@@ -386,7 +456,7 @@ jobs:
           adapter: exit-code
           report-path: reports/npm-audit.log
           command-outcome: ${{ steps.quality-command.outcome }}
-          graph-digest: 10187594b81c46307c7f497025a09d20b5843dc5327e6d9400b57e27f7ab1841
+          graph-digest: 320d6b018b783d110da5c5ee0627a5498dca418d233222d521c33c846821629e
           approval-findings: 'true'
           approval-files: 'false'
           approval-node: 'false'
@@ -469,7 +539,7 @@ jobs:
           adapter: junit
           report-path: reports/playwright/junit.xml
           command-outcome: ${{ job.status }}
-          graph-digest: 10187594b81c46307c7f497025a09d20b5843dc5327e6d9400b57e27f7ab1841
+          graph-digest: 320d6b018b783d110da5c5ee0627a5498dca418d233222d521c33c846821629e
           approval-findings: 'false'
           approval-files: 'false'
           approval-node: 'false'
@@ -557,7 +627,7 @@ jobs:
           adapter: junit
           report-path: reports/playwright/junit.xml
           command-outcome: ${{ job.status }}
-          graph-digest: 10187594b81c46307c7f497025a09d20b5843dc5327e6d9400b57e27f7ab1841
+          graph-digest: 320d6b018b783d110da5c5ee0627a5498dca418d233222d521c33c846821629e
           approval-findings: 'false'
           approval-files: 'false'
           approval-node: 'false'
@@ -645,7 +715,7 @@ jobs:
           adapter: junit
           report-path: reports/playwright/junit.xml
           command-outcome: ${{ job.status }}
-          graph-digest: 10187594b81c46307c7f497025a09d20b5843dc5327e6d9400b57e27f7ab1841
+          graph-digest: 320d6b018b783d110da5c5ee0627a5498dca418d233222d521c33c846821629e
           approval-findings: 'false'
           approval-files: 'false'
           approval-node: 'false'
@@ -733,7 +803,7 @@ jobs:
           adapter: junit
           report-path: reports/playwright/junit.xml
           command-outcome: ${{ job.status }}
-          graph-digest: 10187594b81c46307c7f497025a09d20b5843dc5327e6d9400b57e27f7ab1841
+          graph-digest: 320d6b018b783d110da5c5ee0627a5498dca418d233222d521c33c846821629e
           approval-findings: 'false'
           approval-files: 'false'
           approval-node: 'false'

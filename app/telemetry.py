@@ -121,8 +121,8 @@ class RequestTelemetry:
                 if route == '/unmatched' and scope.get('path','').startswith('/static/'): route = '/static/{path}'
                 elapsed = time.perf_counter() - started
                 span.update_name(method + ' ' + route)
-                span.set_attributes({'http.request.method': method, 'http.route': route, 'http.response.status_code': status, 'http.request.body.size': received})
-                if upload_finished is not None: span.set_attribute('wishlist.request_body_receive_seconds', upload_finished)
+                span.set_attributes({'http.request.method': method, 'http.route': route, 'http.response.status_code': status, 'wishlist.upload.bytes': received})
+                if upload_finished is not None: span.set_attribute('wishlist.upload.receive_seconds', upload_finished)
                 if status >= 500: span.set_status(Status(StatusCode.ERROR))
                 REQUESTS.labels(method, route, str(status)).inc(); DURATION.labels(method, route).observe(elapsed)
                 LOG.info('method=%s route=%s status=%s duration_ms=%.1f trace_id=%032x', method, route, status, elapsed*1000, span.get_span_context().trace_id)

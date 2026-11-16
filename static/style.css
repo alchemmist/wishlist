@@ -181,3 +181,12 @@ body[data-hc-zoom-active] .medium-zoom-overlay{z-index:1000}
 #dismiss-progress{position:absolute;right:7px;top:5px;border:0;background:transparent;padding:2px 5px;font:18px/1 monospace;color:#777}
 #save-progress{pointer-events:none}
 #save-progress button{pointer-events:auto}
+
+.photo-load-status{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;padding:8px;text-align:center;color:#777;font-size:12px;background:#f5f5f5;pointer-events:none}
+.photo-load-status[hidden],.photo-retry[hidden]{display:none}
+.photo-retry{position:absolute;left:8px;right:8px;bottom:8px;z-index:2;font-size:12px;background:#fff;border:1px solid #ddd;border-radius:4px;padding:5px;cursor:pointer}
+.product-photo[hidden]{display:none}
+
+.drawing[data-zoom-loading]::after,.drawing[data-zoom-error]::after{position:absolute;left:4px;right:4px;bottom:4px;padding:4px;border-radius:3px;background:#ffffffe6;color:#555;font-size:11px;text-align:center;pointer-events:none}
+.drawing[data-zoom-loading]::after{content:'Loading original…'}
+.drawing[data-zoom-error]::after{content:'Original unavailable · try again'}

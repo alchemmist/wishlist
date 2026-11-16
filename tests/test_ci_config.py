@@ -9,7 +9,7 @@ import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
 PROJECTS = {'desktop-chromium', 'desktop-firefox', 'mobile-chromium', 'mobile-webkit'}
-CHECKS = {'graph', 'workflow-syntax', 'python-syntax', 'javascript-syntax', 'unit', 'python-audit', 'npm-audit'}
+CHECKS = {'graph', 'workflow-syntax', 'python-syntax', 'javascript-syntax', 'unit', 'python-audit', 'npm-audit', 'image-optimizer'}
 E2E_NODES = {'e2e-' + project for project in PROJECTS}
 RUNTIME = 'alchemmist/quality-graph@3b0cf7d8a33215d5a3bb5521b4e0e41c18e8cb7c'
 

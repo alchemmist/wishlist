@@ -143,3 +143,36 @@ not a permanent “Gift updated” banner. Reduced-motion users get static feedb
 See `OBSERVABILITY.md` for tracing, privacy, private metrics and deployment. The
 production chart, dedicated renewable client certificate, Collector job and
 Grafana dashboard are maintained in the sibling Homelab repository.
+
+## Image pipeline
+
+`IMAGE_OPTIMIZER_URL` enables the private Sharp/libvips HTTP service packaged in
+the same image (`node /opt/image-optimizer/server.cjs`). It accepts binary POST
+`/master` and `/preview`, not URLs. New originals are validated, converted to
+full-resolution **lossless WebP** plus a separate <=480×960 preview, then only
+those two derivatives are stored in S3. Metadata is stripped except ICC; EXIF
+orientation is applied. Animation/alpha are retained. JPEG→lossless WebP can grow:
+we do not promise lossless conversion always reduces bytes. Preview downscaling
+is display-only; zoom fetches the full master. A failed optimizer fails the
+upload with retry, never silently persists an unoptimized original.
+
+Each photo starts its own upload immediately (no application upload semaphore).
+Finite browser transports, CPU/native workers and Kubernetes memory remain real
+limits. New jobs use the private optimizer concurrently; Node/libvips schedules
+its native CPU work. Infrastructure resources do not make unlimited work free.
+
+Gallery covers for the first three cards have high priority. A four-request
+**background preview** scheduler prioritizes other covers, nearby galleries
+(IntersectionObserver +600px) and then idle work. This scheduler is intentionally
+separate from uncapped upload fan-out. Failed slides show retry, not a stale image.
+Full masters load only on zoom. Existing originals are not destructively migrated:
+previews are derived on demand into an atomic disk cache, and no user row/key is
+changed. Immutable media supports Content-Length, ETag/304 and byte ranges;
+`DATA_DIR/media-cache` is disposable, pruned toward a 1GiB budget (an oversized
+active entry/concurrent writes can temporarily exceed it), not authoritative data.
+
+Tracing: image.optimize.master/preview with input/output bytes and native engine
+time; storage.open/s3.download/media.cache/media.prepare; browser.image.load and
+browser.image.decode. Request receive timing uses `wishlist.upload.receive_seconds`
+and byte count `wishlist.upload.bytes` (the old request_body attribute was removed
+by the central privacy scrubber). No bodies, filenames or gift content are labels.

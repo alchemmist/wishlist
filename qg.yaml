@@ -101,6 +101,23 @@ nodes:
         node --input-type=module --check < "$file"
       done
       node --check playwright.config.js
+  image-optimizer:
+    title: Sharp/libvips lossless optimizer and dependency audit
+    profile: frontend
+    needs: [javascript-syntax]
+    shell: bash
+    run: |
+      set -euo pipefail
+      mkdir -p reports
+      cd services/image-optimizer
+      npm ci
+      npm audit --audit-level=low
+      node --test --test-reporter=junit test.cjs > ../../reports/image-optimizer.xml
+    results:
+      junit: reports/image-optimizer.xml
+    policy:
+      approvals:
+        findings: false
   unit:
     title: API, concurrency, migrations and storage tests
     profile: python

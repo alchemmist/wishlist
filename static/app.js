@@ -1,4 +1,5 @@
 import mediumZoom from './vendor/zoom.js';
+import {preloadPhoto, warmGallery, forgetGallery} from './photos.js';
 import {tracedFetch as fetch, beginSpan, pageSpan, routeOf, traceHeader, rememberRequest} from './telemetry.js';
 
 const $ = selector => document.querySelector(selector);
@@ -46,8 +47,9 @@ function prepareZoomSource(image) {
   if (!image.naturalWidth || !image.naturalHeight) return;
   zoomSourceStyles.set(image, image.getAttribute('style'));
   const box = image.getBoundingClientRect();
-  const scale = Math.min(box.width / image.naturalWidth, box.height / image.naturalHeight);
-  const width = image.naturalWidth * scale, height = image.naturalHeight * scale;
+  const natural = zoomSourceSizes.get(image) || {width: image.naturalWidth, height: image.naturalHeight};
+  const scale = Math.min(box.width / natural.width, box.height / natural.height);
+  const width = natural.width * scale, height = natural.height * scale;
   const left = image.offsetLeft + (box.width - width) / 2;
   const top = image.offsetTop + (box.height - height) / 2;
   Object.assign(image.style, {width: width + 'px', height: height + 'px',
@@ -61,23 +63,34 @@ function restoreZoomSource(image) {
   zoomSourceStyles.delete(image);
 }
 let pendingZoom = 0;
+const zoomSourceSizes = new WeakMap();
+async function decodedPhoto(image) {
+  // Firefox may resolve decode() for the previous bitmap during a src change.
+  if (!image.complete) await new Promise((resolve, reject) => {
+    const done = event => {
+      image.removeEventListener('load', done); image.removeEventListener('error', done);
+      if (event.type === 'load') resolve(); else reject(new Error('Photo unavailable'));
+    };
+    image.addEventListener('load', done); image.addEventListener('error', done);
+  });
+  await image.decode();
+}
 async function openPhotoZoom(image) {
-  const request = ++pendingZoom, source = image.src;
-  // Hover can change src immediately before a click. Wait for intrinsic sizes
-  // of that selected photo, not the previous image or a still-loading box.
+  const request = ++pendingZoom, thumbnail = image.src, original = image.dataset.original || thumbnail;
   try {
-    // Firefox can resolve decode() using the previous bitmap while a new src
-    // is still loading. Wait for load first, then decode that source.
-    if (!image.complete) await new Promise((resolve, reject) => {
-      const done = event => {
-        image.removeEventListener('load', done); image.removeEventListener('error', done);
-        if (event.type === 'load') resolve(); else reject(new Error('Photo unavailable'));
-      };
-      image.addEventListener('load', done); image.addEventListener('error', done);
-    });
-    await image.decode();
-  } catch { return; }
-  if (request !== pendingZoom || !image.isConnected || image.src !== source) return;
+    await decodedPhoto(image);
+    if (original !== thumbnail) {
+      const master = new Image(); image.parentElement.dataset.zoomLoading = ''; delete image.parentElement.dataset.zoomError;
+      master.src = original; await decodedPhoto(master);
+      if (request !== pendingZoom || image.src !== thumbnail || image.dataset.original !== original || image.hidden) return;
+      zoomSourceSizes.set(image, {width: master.naturalWidth, height: master.naturalHeight});
+      image.setAttribute('data-zoom-src', original);
+    }
+  } catch {
+    if (request === pendingZoom && image.src === thumbnail) image.parentElement.dataset.zoomError = '';
+    return;
+  } finally { if (request === pendingZoom) delete image.parentElement.dataset.zoomLoading; }
+  if (request !== pendingZoom || !image.isConnected || image.src !== thumbnail || image.hidden) return;
   zoom.open({target: image});
 }
 function ensureZoom() {
@@ -85,7 +98,7 @@ function ensureZoom() {
     zoom = mediumZoom({background: 'rgba(0,0,0,.7)', margin: innerWidth < 868 ? 25 : 50, scrollOffset: 50});
     zoom.on('open', event => { zoomOpening = true; closeZoomWhenReady = false; document.body.dataset.hcZoomActive = ''; prepareZoomSource(event.target); });
     zoom.on('opened', () => { zoomOpening = false; if (closeZoomWhenReady) zoom.close(); });
-    zoom.on('closed', event => { restoreZoomSource(event.target); delete document.body.dataset.hcZoomActive; closeZoomWhenReady = false; event.target.focus({preventScroll: true}); });
+    zoom.on('closed', event => { restoreZoomSource(event.target); zoomSourceSizes.delete(event.target); delete document.body.dataset.hcZoomActive; closeZoomWhenReady = false; event.target.focus({preventScroll: true}); });
     addEventListener('resize', () => zoom.update({margin: innerWidth < 868 ? 25 : 50}));
   }
   zoom.detach();
@@ -105,17 +118,47 @@ function ensureZoom() {
   }
   if (images.length) zoom.attach(images);
 }
-function card(item) {
+function card(item, index = 0) {
   const node = el('article', null, 'gift');
   node.dataset.id = item.id;
   const figure = el('div', null, 'drawing');
   const photos = item.photos?.length ? item.photos : item.image ? [{url: item.image}] : [];
   if (photos.length) {
+    figure.tabIndex = -1;
     const image = el('img', null, 'product-photo');
-    image.src = photos[0].url; image.alt = item.title;
-    image.loading = 'lazy'; image.draggable = false;
-    image.onerror = () => { image.hidden = true; };
-    figure.append(image);
+    image.alt = item.title; image.decoding = 'async'; image.draggable = false;
+    const status = el('span', 'Loading photo…', 'photo-load-status');
+    status.setAttribute('role', 'status');
+    const retry = el('button', 'Retry photo', 'photo-retry'); retry.type = 'button'; retry.hidden = true;
+    figure.append(image, status, retry);
+    const coverPriority = index < 3 ? 0 : 1;
+    let selection = 0, selected = 0;
+    const load = async index => {
+      const generation = ++selection; selected = index;
+      delete figure.dataset.zoomLoading; delete figure.dataset.zoomError;
+      const photo = photos[index];
+      const restoreFocus = document.activeElement === image;
+      image.hidden = true; if (restoreFocus) figure.focus({preventScroll: true});
+      status.hidden = false; status.textContent = 'Loading photo…'; retry.hidden = true;
+      figure.setAttribute('aria-busy', 'true');
+      try {
+        await preloadPhoto(photo.preview || photo.url, selected === 0 && coverPriority === 0 ? 0 : 1);
+        if (generation !== selection) return;
+        image.src = photo.preview || photo.url;
+        image.dataset.original = new URL(photo.url, location.href).href; image.removeAttribute('data-zoom-src');
+        await decodedPhoto(image);
+        if (generation !== selection) return;
+        // Only expose a decoded selected bitmap; never flash the previous src.
+        status.hidden = true; image.hidden = false; figure.removeAttribute('aria-busy');
+        if (document.activeElement === figure) image.focus({preventScroll: true});
+      } catch {
+        if (generation !== selection) return;
+        figure.removeAttribute('aria-busy'); status.textContent = 'Photo could not load'; retry.hidden = false;
+      }
+    };
+    retry.onclick = event => { event.stopPropagation(); load(selected); };
+    warmGallery(figure, photos);
+    if (photos.length === 1) load(0);
     if (photos.length > 1) {
       figure.classList.add('photo-story');
       const indicators = el('div', null, 'photo-story-bars');
@@ -128,14 +171,14 @@ function card(item) {
         if (active === next) return;
         indicators.children[active]?.classList.remove('active');
         active = next;
-        image.src = photos[active].url; image.hidden = false;
+        load(active);
         image.alt = active ? item.title + ' — photo ' + (active + 1) : item.title;
         image.setAttribute('aria-label', 'Enlarge photo: ' + image.alt);
         figure.dataset.photoIndex = active;
         indicators.children[active].classList.add('active');
       };
       figure.onpointermove = event => {
-        if (event.pointerType !== 'mouse') return;
+        if (event.pointerType !== 'mouse' || event.target.closest('.photo-retry')) return;
         // Focus/scroll in WebKit can emit a stationary pointermove; do not
         // overwrite a keyboard/swipe selection unless the mouse really moved.
         if (lastMouse && lastMouse.x === event.clientX && lastMouse.y === event.clientY) return;
@@ -152,6 +195,12 @@ function card(item) {
       figure.onpointercancel = () => { touchStart = null; };
       figure.addEventListener('click', event => { if (swiped) { event.preventDefault(); event.stopPropagation(); swiped = false; } }, true);
       figure.addEventListener('gallery-step', event => show(active + event.detail));
+      figure.onkeydown = event => {
+        if (event.target !== figure) return;
+        if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
+          event.preventDefault(); show(active + (event.key === 'ArrowLeft' ? -1 : 1));
+        }
+      };
       figure.append(indicators); show(0);
     }
   } else node.classList.add('no-photo');
@@ -253,6 +302,7 @@ async function load() {
     document.title = data.owner.username + ' / Wishlist';
     $('#owner-name').textContent = data.owner.name || data.owner.username;
     form.hidden = !data.mine;
+    for (const figure of document.querySelectorAll('#items .drawing')) forgetGallery(figure);
     $('#items').replaceChildren(...data.items.map(card));
     if (!data.items.length) {
       $('#empty').hidden = false; $('#empty').textContent = data.mine ? 'The list is empty. Add your first gift above.' : 'Nothing here yet.';
@@ -430,7 +480,7 @@ function completeSaveProgress() {
 function updateSavedCard(item) {
   const previous = $('#items [data-id="' + item.id + '"]');
   const node = card(item);
-  if (previous) previous.replaceWith(node); else $('#items').append(node);
+  if (previous) { const figure = previous.querySelector('.drawing'); if (figure) forgetGallery(figure); previous.replaceWith(node); } else $('#items').append(node);
   $('#empty').hidden = true; ensureZoom();
 }
 function saveStatus(message, detail = '', percent = null) {
@@ -509,27 +559,24 @@ form.onsubmit = async event => {
     if (!sameOrder(persistedIds)) { saveStatus('Updating gallery…'); await saveOrder(); }
     const pending = composerPhotos.filter(photo => !photo.persisted);
     const totalBytes = pending.reduce((total, photo) => total + photo.file.size, 0);
-    const sent = new Map(); let completed = 0, cursor = 0;
+    const sent = new Map(); let completed = 0;
     const formatBytes = value => value >= 1024 * 1024 ? (value / (1024 * 1024)).toFixed(1) + ' MB' : Math.round(value / 1024) + ' KB';
     const update = (photo, ratio, received = false) => {
       sent.set(photo.id, photo.file.size * ratio);
       const transferred = [...sent.values()].reduce((sum, bytes) => sum + bytes, 0);
-      saveStatus((received ? 'Saving photos to storage' : 'Uploading photos') + ' — ' + completed + ' of ' + pending.length + ' saved',
+      saveStatus((received ? 'Optimizing and saving photos' : 'Uploading photos') + ' — ' + completed + ' of ' + pending.length + ' saved',
         photo.file.name + ' · ' + formatBytes(transferred) + ' / ' + formatBytes(totalBytes), received ? null : (totalBytes ? transferred / totalBytes * 100 : 0));
       const tile = $('#photo-previews [data-photo-id="' + photo.id + '"]');
       if (tile) tile.dataset.upload = received ? 'Saving…' : 'Uploading ' + Math.round(ratio * 100) + '%';
     };
-    const worker = async () => {
-      while (cursor < pending.length) {
-        if (controller.signal.aborted) throw new DOMException('Saving stopped', 'AbortError');
-        const photo = pending[cursor++]; update(photo, 0);
-        await uploadPhoto(item.id, photo, controller.signal, ratio => update(photo, ratio), () => update(photo, 1, true), saveSpan.context);
-        photo.persisted = true; completed++;
-        const tile = $('#photo-previews [data-photo-id="' + photo.id + '"]');
-        if (tile) tile.dataset.upload = 'Saved';
-      }
-    };
-    await Promise.all(Array.from({length: Math.min(3, pending.length)}, worker));
+    await Promise.all(pending.map(async photo => {
+      if (controller.signal.aborted) throw new DOMException('Saving stopped', 'AbortError');
+      update(photo, 0);
+      await uploadPhoto(item.id, photo, controller.signal, ratio => update(photo, ratio), () => update(photo, 1, true), saveSpan.context);
+      photo.persisted = true; completed++;
+      const tile = $('#photo-previews [data-photo-id="' + photo.id + '"]');
+      if (tile) tile.dataset.upload = 'Saved';
+    }));
     if (pending.length) { saveStatus('Finishing…'); await saveOrder(); }
     const renderSpan = beginSpan('browser.render', saveSpan.context);
     updateSavedCard(item); resetComposer(); renderSpan.end(); completeSaveProgress();

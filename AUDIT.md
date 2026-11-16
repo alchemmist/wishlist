@@ -8,8 +8,8 @@
 
 ### Последний результат проверок
 
-- **71 pytest-проверка**: 63 проверки приложения (API, права, конкурентные запросы, валидация, миграции, локальные изображения и S3-контракт) и 8 регрессионных проверок quality/deploy-пайплайна.
-- **152 E2E-проверки**: 38 сценариев × Chromium desktop, Firefox desktop, Chromium/Pixel 7 и WebKit/iPhone 13. Мобильные устройства эмулируются, это не физические телефоны.
+- **77 pytest-проверка**: 63 проверки приложения (API, права, конкурентные запросы, валидация, миграции, локальные изображения и S3-контракт) и 8 регрессионных проверок quality/deploy-пайплайна.
+- **156 E2E-проверок**: 39 сценариев × Chromium desktop, Firefox desktop, Chromium/Pixel 7 и WebKit/iPhone 13. Мобильные устройства эмулируются, это не физические телефоны.
 - Дополнительный повторный прогон: **168/168 passed**, без автоматических retries (до последнего конфигурационного теста S3; сценарии приложения те же).
 - Прогоны выполнены также на **Python 3.13**, используемом Dockerfile/CI, в отдельном окружении.
 - `pip-audit -r requirements.txt`: известных уязвимостей не найдено после обновления зависимостей.
@@ -229,3 +229,24 @@ Read-only production snapshot перед rollout: SQLite SELECT ~1ms, S3 HEAD ~6
 Загрузка нового src ожидается до decode (в том числе в Firefox); Escape отменяет
 отложенное открытие. E2E проверяет портрет 1:4 и панораму 4:1, мышь/клавиатуру,
 помещение в viewport, возврат cover и отмену открытия ещё загружаемого фото.
+
+## Исследование медленных фото и новый pipeline
+
+Grafana MCP, 2026-11-16: trace `d4ee505c2beea3d00306d989edf0ae42` — Save
+16photos/17.076s; s3.put 0.287–3.570s/photo (20.843s summed, overlapping),
+validation153ms summed, DB commit106ms summed. Not evidence that all17s is S3.
+Trace `790bffe3aa50dcf9987b927cfc96b809`:4photos/14.014s; s3.put2.078–3.168s.
+Trace `9237714527e834b24218dbb13a0de6b8`: media15.587s total / storage.open191ms /
+media.stream13.686s. Trace `3b12c9fdce3ad4f9801d930d09fdd1da`: interrupted/late
+stream near56s; delivery/read/backpressure was not split before this change.
+These spans were actually retrieved through the read-only official Grafana MCP;
+raw API supplement used only for numeric storage-byte attributes omitted by the
+MCP trace formatter. Central scrubber removed request_body numeric timing; fixed
+attribute name rather than weakening shared privacy filters/sampling.
+
+Root frontend issue: repeatedly changing src on one lazy img without preload
+kept old bitmaps/cancelled unfinished downloads; onerror hid it indefinitely.
+Decoded previews, selection generation checks, visible loading/retry, priority
+background warming and full-master-only zoom now covered across four browsers.
+Native Sharp tests additionally compare decoded lossless pixels, EXIF orientation,
+alpha and animated GIF frame/timing/loop preservation. Existing originals retained.

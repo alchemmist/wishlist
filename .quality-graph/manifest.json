@@ -6,7 +6,7 @@
     ]
   },
   "defaultBranch": "main",
-  "graphDigest": "10187594b81c46307c7f497025a09d20b5843dc5327e6d9400b57e27f7ab1841",
+  "graphDigest": "320d6b018b783d110da5c5ee0627a5498dca418d233222d521c33c846821629e",
   "graphVersion": 0,
   "labels": {
     "enabled": false
@@ -119,6 +119,35 @@
       },
       "timeoutMinutes": 10,
       "title": "JavaScript syntax"
+    },
+    {
+      "env": {},
+      "id": "image-optimizer",
+      "needs": [
+        "javascript-syntax"
+      ],
+      "policy": {
+        "approvals": {
+          "files": false,
+          "findings": false,
+          "node": false
+        },
+        "blocking": true,
+        "blockingSeverities": [
+          "error"
+        ]
+      },
+      "profile": "frontend",
+      "result": {
+        "adapter": "junit",
+        "path": "reports/image-optimizer.xml"
+      },
+      "step": {
+        "run": "set -euo pipefail\nmkdir -p reports\ncd services/image-optimizer\nnpm ci\nnpm audit --audit-level=low\nnode --test --test-reporter=junit test.cjs > ../../reports/image-optimizer.xml\n",
+        "shell": "bash"
+      },
+      "timeoutMinutes": 10,
+      "title": "Sharp/libvips lossless optimizer and dependency audit"
     },
     {
       "env": {},

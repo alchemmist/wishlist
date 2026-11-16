@@ -1,0 +1,17 @@
+{
+  "name": "image-optimizer",
+  "version": "1.0.0",
+  "description": "Private Sharp/libvips lossless image adapter",
+  "main": "server.cjs",
+  "scripts": {
+    "test": "node --test test.cjs"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "sharp": "0.35.5"
+  },
+  "private": true
+}

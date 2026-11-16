@@ -1,4 +1,5 @@
 import html
+import hashlib
 import logging
 import os
 import secrets
@@ -113,7 +114,7 @@ def links_of(item_id: int, db) -> list[str]:
 
 
 def photos_of(item_id, db):
-    return [{"id": row["id"], "url": store.url(row["image_key"])} for row in
+    return [{"id": row["id"], "url": store.url(row["image_key"]), "preview": store.preview_url(row["image_key"])} for row in
             db.execute("SELECT * FROM item_images WHERE item_id = ? ORDER BY position, id", (item_id,))]
 
 
@@ -450,7 +451,7 @@ def add_photo(item_id: int, photo_id: UUID, request: Request, file: UploadFile =
     if existing:
         if existing["item_id"] != item_id:
             raise HTTPException(409, "Photo identifier already in use")
-        return {"id": photo_id, "url": store.url(existing["image_key"])}
+        return {"id": photo_id, "url": store.url(existing["image_key"]), "preview": store.preview_url(existing["image_key"])}
     if file.size == 0:
         raise HTTPException(400, "Choose a non-empty image")
     try:
@@ -468,7 +469,7 @@ def add_photo(item_id: int, photo_id: UUID, request: Request, file: UploadFile =
                 raise HTTPException(409, "Photo identifier already in use")
             db.rollback()
             store.delete(key)
-            return {"id": photo_id, "url": store.url(existing["image_key"])}
+            return {"id": photo_id, "url": store.url(existing["image_key"]), "preview": store.preview_url(existing["image_key"])}
         count = db.execute("SELECT COUNT(*) FROM item_images WHERE item_id = ?", (item_id,)).fetchone()[0]
         position = db.execute("SELECT COALESCE(MAX(position), -1) + 1 FROM item_images WHERE item_id = ?", (item_id,)).fetchone()[0]
         db.execute("INSERT INTO item_images VALUES (?, ?, ?, ?)", (photo_id, item_id, key, position))
@@ -479,7 +480,7 @@ def add_photo(item_id: int, photo_id: UUID, request: Request, file: UploadFile =
         db.rollback()
         store.delete(key)
         raise
-    return {"id": photo_id, "url": store.url(key)}
+    return {"id": photo_id, "url": store.url(key), "preview": store.preview_url(key)}
 
 
 @app.patch("/api/items/{item_id}/images")
@@ -548,24 +549,22 @@ def release(item_id: int, request: Request, body: NameIn | None = None, db=Depen
 
 
 @app.get("/media/{key:path}")
-def media(key: str):
-    if ".." in key.split("/"):
+def media(key: str, request: Request, preview: bool = False):
+    if not store._safe_key(key) or key.startswith('_previews/'):
         raise HTTPException(404)
     try:
-        body = store.open(key)
+        path = store.media_file(key, preview)
     except Exception:
-        logger.exception("Photo storage read failed")
-        raise HTTPException(503, "Photo storage is unavailable")
-    if body is None:
+        logger.warning("Photo preparation failed")
+        raise HTTPException(503, "Photo is temporarily unavailable", headers={"Cache-Control": "no-store", "Retry-After": "2"})
+    if path is None:
         raise HTTPException(404)
-    def chunks():
-        span = TRACER.start_span("media.stream")
-        try:
-            while chunk := body.read(64 * 1024):
-                yield chunk
-        finally:
-            body.close(); span.end()
-    return StreamingResponse(chunks(), background=BackgroundTask(body.close), media_type=store.content_type(key), headers={"X-Content-Type-Options": "nosniff", "Cache-Control": "public, max-age=86400"})
+    variant = 'preview-v1:' if preview and store.optimizer else 'master:'
+    etag = '"' + hashlib.sha256((variant + key).encode()).hexdigest() + '"'
+    headers = {"X-Content-Type-Options": "nosniff", "Cache-Control": "public, max-age=31536000, immutable", "ETag": etag}
+    if etag in request.headers.get('if-none-match', '').split(', ') or request.headers.get('if-none-match') == '*':
+        return Response(status_code=304, headers=headers)
+    return FileResponse(path, media_type='image/webp' if preview and store.optimizer else store.content_type(key), headers=headers)
 
 
 @app.get("/")
@@ -588,7 +587,7 @@ app.mount("/static", StaticFiles(directory=ROOT / "static"), name="static")
 
 class BrowserSpan(BaseModel):
     model_config = {"extra": "forbid"}
-    name: Literal['browser.save','browser.fetch','browser.upload','browser.render','browser.page','browser.resource']
+    name: Literal['browser.save','browser.fetch','browser.upload','browser.render','browser.page','browser.resource','browser.image.load','browser.image.decode']
     trace_id: str = Field(pattern=r'^[0-9a-f]{32}$')
     span_id: str = Field(pattern=r'^[0-9a-f]{16}$')
     parent_id: str | None = Field(default=None, pattern=r'^[0-9a-f]{16}$')

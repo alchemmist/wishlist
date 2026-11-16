@@ -625,7 +625,7 @@ test('editing many photos has visible progress and elapsed time; over 20 photos 
   await expect(page.locator('#composer [type=submit]')).toHaveText('Saving…');
   await expect(page.locator('#save-status')).toContainText('0 of 26');
   await expect(page.locator('#save-elapsed')).toHaveText(/Elapsed 0:0[1-9]/);
-  expect(activeRequests).toBe(3);
+  await expect.poll(() => activeRequests).toBe(26);
   await expect(page.getByRole('button', {name: 'Stop saving', exact: true})).toBeEnabled();
   release();
   await expect(page.locator('#save-progress')).toBeHidden({timeout: 20000});
@@ -789,20 +789,26 @@ test('zoom reveals the full portrait and landscape originals and restores the cr
   }
   await page.getByRole('textbox', {name: 'Title', exact: true}).fill('Original proportions');
   await page.getByLabel('Photo', {exact: true}).setInputFiles(files);
+  let release;
+  const gate = new Promise(resolve => { release = resolve; });
+  let requests = 0, secondStarted;
+  const secondLoading = new Promise(resolve => { secondStarted = resolve; });
+  await page.route('**/media/**', async route => {
+    if (++requests === 2) { secondStarted(); await gate; }
+    await route.continue();
+  });
   await page.getByRole('button', {name: 'Add', exact: true}).click();
   const image = page.locator('.gift .product-photo');
   await expect(image).toBeVisible();
   const frameBefore = await page.locator('.gift .drawing').boundingBox();
   for (const [index, ratio] of [[0, .25], [1, 4]]) {
     if (index) {
-      // A newly hovered/selected source may still be downloading. Escape must
-      // cancel a pending decode, and a later zoom must use its real dimensions.
-      let release;
-      const gate = new Promise(resolve => { release = resolve; });
-      await page.route('**/media/**', async route => { await gate; await route.continue(); });
-      const loading = page.waitForRequest('**/media/**');
-      await image.focus(); await image.press('ArrowRight'); await loading;
-      await image.press('Enter');
+      // Background preloading is already in flight, but a selected unfinished
+      // slide must show loading, never the previous bitmap.
+      await secondLoading;
+      await image.focus(); await image.press('ArrowRight');
+      await expect(image).toBeHidden();
+      await expect(page.locator('.photo-load-status')).toHaveText('Loading photo…');
       await expect(page.locator('.medium-zoom-image--opened')).toHaveCount(0);
       await page.keyboard.press('Escape');
       release();
@@ -836,4 +842,54 @@ test('zoom reveals the full portrait and landscape originals and restores the cr
     expect(frameAfter.width).toBeCloseTo(frameBefore.width, 0);
     expect(frameAfter.height).toBeCloseTo(frameBefore.height, 0);
   }
+});
+
+test('gallery preloads previews, hides stale slides, retries failures and zooms only the full master', async ({page}) => {
+  const username = await signIn(page);
+  const buffers = await page.evaluate(() => [24,240].map(width => {
+    const canvas = document.createElement('canvas'); canvas.width = width; canvas.height = width * 4;
+    const ctx = canvas.getContext('2d'); ctx.fillStyle = 'red'; ctx.fillRect(0,0,width,width*4);
+    ctx.fillStyle = 'blue'; ctx.fillRect(0,width*3,width,width);
+    return canvas.toDataURL('image/png').split(',')[1];
+  }));
+  const photos = [1,2,3].map(index => ({id: String(index), url: `/media/mock-master-${index}.png`, preview: `/media/mock-preview-${index}.png`}));
+  await page.route('**/api/wishlists/' + username, route => route.fulfill({json:{owner:{username},mine:false,items:[{
+    id:999,title:'Prepared previews',price:'',description:'',links:[],photos,image:photos[0].url,mine:false,reserved:false
+  }]}}));
+  let release, allowThird = false, originals = 0;
+  const gate = new Promise(resolve => {release = resolve;});
+  await page.route('**/media/mock-*', async route => {
+    const url = route.request().url(), master = url.includes('master');
+    if (master) originals++;
+    if (url.includes('preview-2')) await gate;
+    if (url.includes('preview-3') && !allowThird) { await route.fulfill({status:503,body:'Unavailable'}); return; }
+    await route.fulfill({contentType:'image/png',body:Buffer.from(buffers[master ? 1 : 0],'base64')});
+  });
+  await page.reload();
+  const image = page.locator('.gift .product-photo'), drawing = page.locator('.gift .drawing');
+  await expect(image).toBeVisible(); await expect(image).toHaveAttribute('src',photos[0].preview);
+  expect(originals).toBe(0);
+  await image.focus(); await image.press('ArrowRight');
+  await expect(image).toBeHidden(); await expect(drawing).toHaveAttribute('aria-busy','true');
+  // Keyboard remains usable during a pending slide; late slide 2 must not
+  // overwrite a newer choice of slide 1.
+  await page.keyboard.press('ArrowLeft');
+  await expect(image).toBeVisible(); await expect(image).toHaveAttribute('src',photos[0].preview);
+  release();
+  await image.press('ArrowRight'); await expect(image).toHaveAttribute('src',photos[1].preview);
+  await image.press('ArrowRight'); await expect(image).toBeHidden();
+  await expect(page.getByRole('button',{name:'Retry photo',exact:true})).toBeVisible();
+  allowThird = true; await page.getByRole('button',{name:'Retry photo',exact:true}).click();
+  await expect(image).toBeVisible(); await expect(image).toHaveAttribute('src',photos[2].preview);
+  expect(originals).toBe(0);
+  await image.focus(); await image.press('Enter');
+  const master = page.locator('.medium-zoom-image--opened[src$="mock-master-3.png"]');
+  await expect(master).toBeVisible();
+  expect(originals).toBeGreaterThan(0);
+  await expect.poll(() => master.evaluate(img => img.naturalWidth)).toBe(240);
+  await expect(master).toHaveCSS('object-fit','contain');
+  await page.keyboard.press('Escape');
+  await expect(page.locator('body')).not.toHaveAttribute('data-hc-zoom-active');
+  await expect(image).toHaveAttribute('src',photos[2].preview);
+  await expect(image).toHaveCSS('object-fit','cover');
 });
