@@ -484,6 +484,28 @@ test('owner deletes directly next to the pencil; guests cannot; cancellation and
 test('card-shaped composer aligns with saved cards, plus opens picker, drop appends miniatures and narrow layout fits', async ({page}) => {
   await signIn(page); await addGift(page, 'Layout reference', true);
   await expect(page.locator('#composer .photo-field')).toHaveCSS('border-top-style', 'dashed');
+  const halves = await page.locator('.photo-field').evaluate(container => {
+    const box = container.getBoundingClientRect();
+    const top = container.querySelector('#choose-photos').getBoundingClientRect();
+    const bottom = container.querySelector('#paste-photos').getBoundingClientRect();
+    return {width: box.width, height: box.height, topWidth: top.width, bottomWidth: bottom.width,
+      leftInset: top.left - box.left, rightInset: box.right - bottom.right,
+      topHeight: top.height, bottomHeight: bottom.height, gap: bottom.top - top.bottom};
+  });
+  expect(halves.topWidth).toBeCloseTo(halves.width - 2, 1);
+  expect(halves.bottomWidth).toBeCloseTo(halves.width - 2, 1);
+  expect(halves.leftInset).toBeCloseTo(1, 1); expect(halves.rightInset).toBeCloseTo(1, 1);
+  expect(halves.topHeight).toBeCloseTo((halves.height - 2) / 2, 1);
+  expect(halves.bottomHeight).toBeCloseTo(halves.topHeight, 1); expect(halves.gap).toBe(0);
+  await page.locator('#choose-photos').hover();
+  await expect(page.locator('.photo-field')).toHaveCSS('background-color', 'rgb(250, 250, 250)');
+  await expect(page.locator('#choose-photos')).toHaveCSS('background-color', 'rgb(238, 238, 238)');
+  await expect(page.locator('#paste-photos')).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)');
+  await page.locator('#paste-photos').hover();
+  await expect(page.locator('.photo-field')).toHaveCSS('background-color', 'rgb(250, 250, 250)');
+  await expect(page.locator('#paste-photos')).toHaveCSS('background-color', 'rgb(238, 238, 238)');
+  await expect(page.locator('#choose-photos')).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)');
+
   await expect(page.locator('#composer .photo-plus')).toHaveText('+');
   await expect(page.locator('#composer [role=switch]')).toHaveCount(0);
   await expect(page.getByRole('textbox', {name: 'Title', exact: true})).toHaveAttribute('placeholder', 'Title');
