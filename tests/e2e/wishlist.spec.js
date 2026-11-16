@@ -771,3 +771,69 @@ test('browser telemetry propagates traceparent and exports only allowlisted cont
   expect(spans.some(span => span.name === 'browser.fetch' && span.parent_id === save.span_id)).toBe(true);
   expect(spans.some(span => span.name === 'browser.upload' && span.trace_id === save.trace_id)).toBe(true);
 });
+
+test('zoom reveals the full portrait and landscape originals and restores the cropped gallery', async ({page}) => {
+  await signIn(page);
+  const files = [];
+  for (const [width, height] of [[240, 960], [1200, 300]]) {
+    const data = await page.evaluate(([width, height]) => {
+      const canvas = document.createElement('canvas'); canvas.width = width; canvas.height = height;
+      const ctx = canvas.getContext('2d');
+      ctx.fillStyle = '#eee'; ctx.fillRect(0, 0, width, height);
+      for (const [color, x, y] of [['red', 0, 0], ['blue', width - 30, height - 30]]) {
+        ctx.fillStyle = color; ctx.fillRect(x, y, 30, 30);
+      }
+      return canvas.toDataURL('image/png').split(',')[1];
+    }, [width, height]);
+    files.push({name: `${width}x${height}.png`, mimeType: 'image/png', buffer: Buffer.from(data, 'base64')});
+  }
+  await page.getByRole('textbox', {name: 'Title', exact: true}).fill('Original proportions');
+  await page.getByLabel('Photo', {exact: true}).setInputFiles(files);
+  await page.getByRole('button', {name: 'Add', exact: true}).click();
+  const image = page.locator('.gift .product-photo');
+  await expect(image).toBeVisible();
+  const frameBefore = await page.locator('.gift .drawing').boundingBox();
+  for (const [index, ratio] of [[0, .25], [1, 4]]) {
+    if (index) {
+      // A newly hovered/selected source may still be downloading. Escape must
+      // cancel a pending decode, and a later zoom must use its real dimensions.
+      let release;
+      const gate = new Promise(resolve => { release = resolve; });
+      await page.route('**/media/**', async route => { await gate; await route.continue(); });
+      const loading = page.waitForRequest('**/media/**');
+      await image.focus(); await image.press('ArrowRight'); await loading;
+      await image.press('Enter');
+      await expect(page.locator('.medium-zoom-image--opened')).toHaveCount(0);
+      await page.keyboard.press('Escape');
+      release();
+      await expect.poll(() => image.evaluate(img => img.naturalWidth / img.naturalHeight)).toBe(ratio);
+      await expect(page.locator('.medium-zoom-image--opened')).toHaveCount(0);
+      await page.unroute('**/media/**');
+    }
+    await expect.poll(() => image.evaluate(img => img.naturalWidth / img.naturalHeight)).toBe(ratio);
+    await expect(image).toHaveCSS('object-fit', 'cover');
+    // Cover genuinely crops these sources; zoom must not just enlarge that box.
+    const cropped = await image.boundingBox();
+    expect(Math.abs(cropped.width / cropped.height - ratio)).toBeGreaterThan(.1);
+    if (index) await image.press('Enter');
+    else await image.click({position: {x: 5, y: 5}});
+    const opened = page.locator('.medium-zoom-image--opened');
+    await expect(opened).toBeVisible();
+    await expect(opened).toHaveCSS('object-fit', 'contain');
+    await expect.poll(async () => {
+      const box = await opened.boundingBox();
+      return Math.abs(box.width / box.height - ratio);
+    }).toBeLessThan(.01);
+    await expect.poll(async () => {
+      const box = await opened.boundingBox(), viewport = page.viewportSize();
+      return box.x >= 24 && box.y >= 24 && box.x + box.width <= viewport.width - 24 && box.y + box.height <= viewport.height - 24;
+    }).toBe(true);
+    await page.keyboard.press('Escape');
+    await expect(page.locator('body')).not.toHaveAttribute('data-hc-zoom-active');
+    await expect(image).toHaveCSS('object-fit', 'cover');
+    expect(await image.getAttribute('style')).toBe(null);
+    const frameAfter = await page.locator('.gift .drawing').boundingBox();
+    expect(frameAfter.width).toBeCloseTo(frameBefore.width, 0);
+    expect(frameAfter.height).toBeCloseTo(frameBefore.height, 0);
+  }
+});

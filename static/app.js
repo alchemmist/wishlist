@@ -38,12 +38,54 @@ function service(url) {
   if (matches('ozon.ru')) return {label: 'Ozon', kind: 'ozon'};
   return {label: host, kind: 'web'};
 }
+// medium-zoom measures its source box, not object-fit's visible image. Give it
+// an intrinsic-ratio box for the duration of the zoom; the absolute card image
+// cannot reflow the card. Restore its cover geometry before returning focus.
+const zoomSourceStyles = new WeakMap();
+function prepareZoomSource(image) {
+  if (!image.naturalWidth || !image.naturalHeight) return;
+  zoomSourceStyles.set(image, image.getAttribute('style'));
+  const box = image.getBoundingClientRect();
+  const scale = Math.min(box.width / image.naturalWidth, box.height / image.naturalHeight);
+  const width = image.naturalWidth * scale, height = image.naturalHeight * scale;
+  const left = image.offsetLeft + (box.width - width) / 2;
+  const top = image.offsetTop + (box.height - height) / 2;
+  Object.assign(image.style, {width: width + 'px', height: height + 'px',
+    left: left + 'px', top: top + 'px', right: 'auto', bottom: 'auto', objectFit: 'contain'});
+}
+function restoreZoomSource(image) {
+  if (!zoomSourceStyles.has(image)) return;
+  const style = zoomSourceStyles.get(image);
+  if (style === null) image.removeAttribute('style');
+  else image.setAttribute('style', style);
+  zoomSourceStyles.delete(image);
+}
+let pendingZoom = 0;
+async function openPhotoZoom(image) {
+  const request = ++pendingZoom, source = image.src;
+  // Hover can change src immediately before a click. Wait for intrinsic sizes
+  // of that selected photo, not the previous image or a still-loading box.
+  try {
+    // Firefox can resolve decode() using the previous bitmap while a new src
+    // is still loading. Wait for load first, then decode that source.
+    if (!image.complete) await new Promise((resolve, reject) => {
+      const done = event => {
+        image.removeEventListener('load', done); image.removeEventListener('error', done);
+        if (event.type === 'load') resolve(); else reject(new Error('Photo unavailable'));
+      };
+      image.addEventListener('load', done); image.addEventListener('error', done);
+    });
+    await image.decode();
+  } catch { return; }
+  if (request !== pendingZoom || !image.isConnected || image.src !== source) return;
+  zoom.open({target: image});
+}
 function ensureZoom() {
   if (!zoom) {
     zoom = mediumZoom({background: 'rgba(0,0,0,.7)', margin: innerWidth < 868 ? 25 : 50, scrollOffset: 50});
-    zoom.on('open', () => { zoomOpening = true; closeZoomWhenReady = false; document.body.dataset.hcZoomActive = ''; });
+    zoom.on('open', event => { zoomOpening = true; closeZoomWhenReady = false; document.body.dataset.hcZoomActive = ''; prepareZoomSource(event.target); });
     zoom.on('opened', () => { zoomOpening = false; if (closeZoomWhenReady) zoom.close(); });
-    zoom.on('closed', event => { delete document.body.dataset.hcZoomActive; closeZoomWhenReady = false; event.target.focus({preventScroll: true}); });
+    zoom.on('closed', event => { restoreZoomSource(event.target); delete document.body.dataset.hcZoomActive; closeZoomWhenReady = false; event.target.focus({preventScroll: true}); });
     addEventListener('resize', () => zoom.update({margin: innerWidth < 868 ? 25 : 50}));
   }
   zoom.detach();
@@ -53,11 +95,12 @@ function ensureZoom() {
     image.tabIndex = 0;
     image.setAttribute('role', 'button');
     image.setAttribute('aria-label', 'Enlarge photo: ' + image.alt);
+    image.onclick = event => { event.stopPropagation(); openPhotoZoom(image); };
     image.onkeydown = event => {
       if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
         event.preventDefault(); image.parentElement.dispatchEvent(new CustomEvent('gallery-step', {detail: event.key === 'ArrowLeft' ? -1 : 1}));
       }
-      if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); zoom.open(image); }
+      if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); openPhotoZoom(image); }
     };
   }
   if (images.length) zoom.attach(images);
@@ -288,6 +331,7 @@ $('#reserve-form').onsubmit = async event => {
 };
 addEventListener('keydown', event => {
   if (event.key === 'Escape') {
+    pendingZoom++;
     if (zoomOpening) closeZoomWhenReady = true;
     else zoom?.close();
     if (!$('#reserve').hidden) closeReservation(true);
