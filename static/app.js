@@ -382,6 +382,7 @@ $('#reserve-form').onsubmit = async event => {
 addEventListener('keydown', event => {
   if (event.key === 'Escape') {
     pendingZoom++;
+    for (const figure of document.querySelectorAll('.drawing[data-zoom-loading]')) delete figure.dataset.zoomLoading;
     if (zoomOpening) closeZoomWhenReady = true;
     else zoom?.close();
     if (!$('#reserve').hidden) closeReservation(true);

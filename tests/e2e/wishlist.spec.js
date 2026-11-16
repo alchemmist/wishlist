@@ -856,11 +856,12 @@ test('gallery preloads previews, hides stale slides, retries failures and zooms 
   await page.route('**/api/wishlists/' + username, route => route.fulfill({json:{owner:{username},mine:false,items:[{
     id:999,title:'Prepared previews',price:'',description:'',links:[],photos,image:photos[0].url,mine:false,reserved:false
   }]}}));
-  let release, allowThird = false, originals = 0;
+  let release, releaseMaster, holdMaster = true, allowThird = false, originals = 0;
+  const masterGate = new Promise(resolve => {releaseMaster = resolve;});
   const gate = new Promise(resolve => {release = resolve;});
   await page.route('**/media/mock-*', async route => {
     const url = route.request().url(), master = url.includes('master');
-    if (master) originals++;
+    if (master) { originals++; if (holdMaster) await masterGate; }
     if (url.includes('preview-2')) await gate;
     if (url.includes('preview-3') && !allowThird) { await route.fulfill({status:503,body:'Unavailable'}); return; }
     await route.fulfill({contentType:'image/png',body:Buffer.from(buffers[master ? 1 : 0],'base64')});
@@ -883,6 +884,12 @@ test('gallery preloads previews, hides stale slides, retries failures and zooms 
   await expect(image).toBeVisible(); await expect(image).toHaveAttribute('src',photos[2].preview);
   expect(originals).toBe(0);
   await image.focus(); await image.press('Enter');
+  await expect(drawing).toHaveAttribute('data-zoom-loading','');
+  await page.keyboard.press('Escape');
+  await expect(drawing).not.toHaveAttribute('data-zoom-loading');
+  await expect(page.locator('body')).not.toHaveAttribute('data-hc-zoom-active');
+  holdMaster = false; releaseMaster();
+  await image.press('Enter');
   const master = page.locator('.medium-zoom-image--opened[src$="mock-master-3.png"]');
   await expect(master).toBeVisible();
   expect(originals).toBeGreaterThan(0);
