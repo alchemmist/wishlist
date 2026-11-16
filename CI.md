@@ -42,7 +42,7 @@ Python is 3.13, Node is 24. Browser jobs install only their required engine.
 | `unit` | Entire pytest suite: API, concurrency, migrations, storage, CI regression checks; JUnit | Python/workflow syntax |
 | `python-audit` | `pip-audit -r requirements-dev.txt`: application, test and Quality Graph dependencies | `graph` |
 | `npm-audit` | `npm ci` and `npm audit --audit-level=low` | `graph` |
-| `e2e-desktop-chromium` | 39 scenarios in desktop Chromium | `unit`, JS syntax |
+| `e2e-desktop-chromium` | 40 scenarios in desktop Chromium | `unit`, JS syntax |
 | `e2e-desktop-firefox` | Same scenarios in desktop Firefox | `unit`, JS syntax |
 | `e2e-mobile-chromium` | Same scenarios with Pixel 7 emulation | `unit`, JS syntax |
 | `e2e-mobile-webkit` | Same scenarios with iPhone 13 / WebKit emulation | `unit`, JS syntax |
@@ -149,7 +149,7 @@ go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.11 -shellcheck= -pyflakes
 Playwright with `--with-deps`; local macOS runs do not need Linux system packages.
 
 Locally verified for this migration: `qg generate` / `qg validate`, actionlint,
-**77 pytest checks**, **156 browser checks** (including authenticated one-click reservations),
+**77 pytest checks**, **160 browser checks** (including authenticated one-click reservations),
 Quality Graph JUnit parsing for pytest and each of the four browser reports,
 and clean Python/npm dependency audits. GitHub-hosted execution, write-token
 publication, branch protection and actual deployment require the bootstrap/probe

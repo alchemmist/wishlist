@@ -900,3 +900,31 @@ test('gallery preloads previews, hides stale slides, retries failures and zooms 
   await expect(image).toHaveAttribute('src',photos[2].preview);
   await expect(image).toHaveCSS('object-fit','cover');
 });
+
+test('starting another original zoom clears only the previous gallery loading feedback', async ({page}) => {
+  const username = await signIn(page);
+  const preview = '/static/assets/photos/coffee-1.webp';
+  const items = [1,2].map(index => ({id:index,title:'Pending master '+index,description:'',price:'',links:[],mine:false,reserved:false,
+    photos:[{id:String(index),url:'/media/pending-master-'+index+'.webp',preview}]}));
+  await page.route('**/api/wishlists/' + username, route => route.fulfill({json:{owner:{username},mine:false,items}}));
+  let releaseFirst, releaseSecond;
+  const first = new Promise(resolve => {releaseFirst=resolve;}), second = new Promise(resolve => {releaseSecond=resolve;});
+  await page.route('**/media/pending-master-*', async route => {
+    await (route.request().url().includes('master-1') ? first : second);
+    await route.fulfill({contentType:'image/webp',body:photo.buffer});
+  });
+  await page.reload();
+  const drawings = page.locator('.gift .drawing');
+  for (let index=0; index<2; index++) {
+    await drawings.nth(index).locator('img').click();
+    await expect(drawings.nth(index)).toHaveAttribute('data-zoom-loading','');
+  }
+  releaseFirst();
+  await expect(drawings.nth(0)).not.toHaveAttribute('data-zoom-loading');
+  await expect(drawings.nth(1)).toHaveAttribute('data-zoom-loading','');
+  await expect(page.locator('body')).not.toHaveAttribute('data-hc-zoom-active');
+  releaseSecond();
+  await expect(page.locator('.medium-zoom-image--opened[src$="pending-master-2.webp"]')).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(page.locator('body')).not.toHaveAttribute('data-hc-zoom-active');
+});

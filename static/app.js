@@ -63,7 +63,7 @@ function restoreZoomSource(image) {
   zoomSourceStyles.delete(image);
 }
 let pendingZoom = 0;
-const zoomSourceSizes = new WeakMap();
+const zoomSourceSizes = new WeakMap(), zoomLoadingRequests = new WeakMap();
 async function decodedPhoto(image) {
   // Firefox may resolve decode() for the previous bitmap during a src change.
   if (!image.complete) await new Promise((resolve, reject) => {
@@ -80,7 +80,7 @@ async function openPhotoZoom(image) {
   try {
     await decodedPhoto(image);
     if (original !== thumbnail) {
-      const master = new Image(); image.parentElement.dataset.zoomLoading = ''; delete image.parentElement.dataset.zoomError;
+      const master = new Image(); zoomLoadingRequests.set(image.parentElement, request); image.parentElement.dataset.zoomLoading = ''; delete image.parentElement.dataset.zoomError;
       master.src = original; await decodedPhoto(master);
       if (request !== pendingZoom || image.src !== thumbnail || image.dataset.original !== original || image.hidden) return;
       zoomSourceSizes.set(image, {width: master.naturalWidth, height: master.naturalHeight});
@@ -89,7 +89,11 @@ async function openPhotoZoom(image) {
   } catch {
     if (request === pendingZoom && image.src === thumbnail) image.parentElement.dataset.zoomError = '';
     return;
-  } finally { if (request === pendingZoom) delete image.parentElement.dataset.zoomLoading; }
+  } finally {
+    if (zoomLoadingRequests.get(image.parentElement) === request) {
+      delete image.parentElement.dataset.zoomLoading; zoomLoadingRequests.delete(image.parentElement);
+    }
+  }
   if (request !== pendingZoom || !image.isConnected || image.src !== thumbnail || image.hidden) return;
   zoom.open({target: image});
 }
