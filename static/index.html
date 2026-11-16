@@ -4,8 +4,8 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Wishlist</title>
-<link rel="stylesheet" href="/static/style.css?v=upload-progress1">
-<script src="/static/app.js?v=upload-progress1" type="module"></script>
+<link rel="stylesheet" href="/static/style.css?v=clipboard1">
+<script src="/static/app.js?v=clipboard1" type="module"></script>
 </head>
 <body>
 <main>
@@ -14,11 +14,16 @@
   <p id="notice" role="status" aria-live="polite"></p>
   <form id="composer" aria-label="Gift editor" hidden>
     <div class="composer-media">
-      <label class="photo-field" title="Add photos">
-        <input aria-label="Photo" name="image" type="file" multiple accept="image/jpeg,image/png,image/webp,image/gif">
-        <span class="photo-plus" aria-hidden="true">+</span>
-        <span class="photo-label">Add photos</span>
-      </label>
+      <div class="photo-field" role="group" aria-label="Add photos">
+        <input aria-label="Photo" name="image" type="file" multiple accept="image/jpeg,image/png,image/webp,image/gif" tabindex="-1">
+        <button id="choose-photos" class="photo-source" type="button" aria-label="Add photos from files" title="Choose files">
+          <span class="photo-plus" aria-hidden="true">+</span><span class="photo-source-label">Files</span>
+        </button>
+        <button id="paste-photos" class="photo-source" type="button" aria-label="Paste image from clipboard" title="Paste an image from clipboard, or press Ctrl+V / ⌘V here">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 5H6a2 2 0 0 0-2 2v13h16V7a2 2 0 0 0-2-2h-3"/><rect x="9" y="3" width="6" height="4" rx="1"/><path d="M8 12h8M8 16h5"/></svg><span class="photo-source-label">Paste</span>
+        </button>
+      </div>
+      <p id="photo-input-status" role="status" aria-live="polite"></p>
       <div id="photo-previews" aria-label="Photo order" role="list"></div>
     </div>
     <div class="composer-content">

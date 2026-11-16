@@ -489,7 +489,7 @@ test('card-shaped composer aligns with saved cards, plus opens picker, drop appe
   await expect(page.getByRole('textbox', {name: 'Title', exact: true})).toHaveAttribute('placeholder', 'Title');
   await expect(page.getByRole('textbox', {name: 'Price', exact: true})).toHaveAttribute('placeholder', 'Price');
   await expect(page.getByRole('textbox', {name: 'Description', exact: true})).toHaveAttribute('placeholder', 'Description');
-  const [picker] = await Promise.all([page.waitForEvent('filechooser'), page.locator('.photo-field').click()]);
+  const [picker] = await Promise.all([page.waitForEvent('filechooser'), page.getByRole('button', {name: 'Add photos from files', exact: true}).click()]);
   await picker.setFiles(photo);
   await expect(page.locator('.photo-tile')).toHaveCount(1);
   const transfer = await page.evaluateHandle(base64 => {
@@ -632,4 +632,76 @@ test('editing upload can be stopped and resumed without losing selected files or
   await expect(page.locator('#save-progress')).toBeHidden();
   const items = (await (await page.request.get('/api/wishlists/' + username)).json()).items;
   expect(items).toHaveLength(1); expect(items[0].photos).toHaveLength(5);
+});
+
+test('split picker reads clipboard images, blocks Save while reading, and saves pasted images when editing', async ({page}) => {
+  const username = await signIn(page); await addGift(page, 'Clipboard gallery', true);
+  await page.getByRole('button', {name: 'Edit Clipboard gallery', exact: true}).click();
+  let pickerOpened = false; page.on('filechooser', () => { pickerOpened = true; });
+  await page.evaluate(base64 => {
+    const blob = new Blob([Uint8Array.from(atob(base64), char => char.charCodeAt(0))], {type: 'image/webp'});
+    Object.defineProperty(navigator, 'clipboard', {configurable: true, value: {read: () => new Promise(resolve => {
+      window.finishClipboardRead = () => resolve([{types: ['text/plain'], getType: async () => new Blob(['text'])}, {types: ['image/webp'], getType: async () => blob}]);
+    })}});
+  }, photo.buffer.toString('base64'));
+  await page.getByRole('button', {name: 'Paste image from clipboard', exact: true}).click();
+  await expect(page.locator('#photo-input-status')).toHaveText('Reading clipboard…');
+  await expect(page.locator('#paste-photos')).toHaveAttribute('aria-busy', 'true');
+  await page.getByRole('button', {name: 'Save', exact: true}).click();
+  await expect(page.locator('#photo-input-status')).toContainText('Please wait');
+  await expect(page.locator('#save-progress')).toBeHidden();
+  await page.evaluate(() => window.finishClipboardRead());
+  await expect(page.locator('.photo-tile')).toHaveCount(2);
+  await expect(page.locator('#photo-input-status')).toHaveText('Image added from clipboard.');
+  expect(pickerOpened).toBe(false);
+  await page.getByRole('button', {name: 'Save', exact: true}).click();
+  await expect(page.locator('#composer [type=submit]')).toHaveText('Add');
+  const item = (await (await page.request.get('/api/wishlists/' + username)).json()).items[0];
+  expect(item.photos).toHaveLength(2);
+});
+
+test('clipboard denial, empty and unsupported APIs explain fallback; native image paste works without permission', async ({page}) => {
+  await signIn(page);
+  await page.evaluate(() => Object.defineProperty(navigator, 'clipboard', {configurable: true, value: {read: async () => { throw new DOMException('Denied', 'NotAllowedError'); }}}));
+  const paste = page.getByRole('button', {name: 'Paste image from clipboard', exact: true});
+  await paste.click();
+  await expect(page.locator('#photo-input-status')).toContainText('Press Ctrl+V');
+  await expect(paste).toBeEnabled();
+  await page.evaluate(() => { navigator.clipboard.read = async () => [{types: ['text/plain']}]; });
+  await paste.click(); await expect(page.locator('#photo-input-status')).toContainText('No image');
+  await page.evaluate(() => Object.defineProperty(navigator, 'clipboard', {configurable: true, value: undefined}));
+  await paste.click(); await expect(page.locator('#photo-input-status')).toContainText('unavailable');
+  const transfer = await page.evaluateHandle(base64 => {
+    const data = new DataTransfer();
+    data.items.add(new File([Uint8Array.from(atob(base64), char => char.charCodeAt(0))], 'pasted.webp', {type: 'image/webp'}));
+    return data;
+  }, photo.buffer.toString('base64'));
+  await paste.focus(); await paste.evaluate((element, data) => {
+    // Firefox does not retain clipboardData supplied to a synthetic ClipboardEvent.
+    const event = new Event('paste', {bubbles: true, cancelable: true});
+    Object.defineProperty(event, 'clipboardData', {value: data}); element.dispatchEvent(event);
+  }, transfer);
+  await transfer.dispose();
+  await expect(page.locator('.photo-tile')).toHaveCount(1);
+  await expect(page.locator('#photo-input-status')).toHaveText('Image pasted.');
+  await page.getByRole('textbox', {name: 'Title', exact: true}).fill('Native paste');
+  await page.getByRole('button', {name: 'Add', exact: true}).click();
+  await expect(page.locator('.gift .product-photo')).toHaveCount(1);
+});
+
+test('clipboard completion after Cancel does not add photos to a different draft', async ({page}) => {
+  await signIn(page); await addGift(page, 'Cancel clipboard');
+  await page.getByRole('button', {name: 'Edit Cancel clipboard', exact: true}).click();
+  await page.evaluate(base64 => {
+    const blob = new Blob([Uint8Array.from(atob(base64), char => char.charCodeAt(0))], {type: 'image/webp'});
+    Object.defineProperty(navigator, 'clipboard', {configurable: true, value: {read: () => new Promise(resolve => {
+      window.finishClipboardRead = () => resolve([{types: ['image/webp'], getType: async () => blob}]);
+    })}});
+  }, photo.buffer.toString('base64'));
+  await page.getByRole('button', {name: 'Paste image from clipboard', exact: true}).click();
+  await page.getByRole('button', {name: 'Cancel', exact: true}).click();
+  await page.evaluate(() => window.finishClipboardRead());
+  await expect(page.locator('#paste-photos')).toBeEnabled();
+  await expect(page.locator('.photo-tile')).toHaveCount(0);
+  await expect(page.getByRole('textbox', {name: 'Title', exact: true})).toHaveValue('');
 });

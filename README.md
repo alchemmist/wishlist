@@ -121,3 +121,13 @@ Large files spool to disk and stream to storage; S3 multipart transfer and media
 responses avoid buffering whole large files in application memory. Validation
 checks supported image/container structure, not an unbounded decoded pixel array.
 Actual disk, browser, network and storage capacities still apply.
+
+
+The dashed photo picker has two halves: **Files** opens the filesystem picker;
+**Paste** reads image data from the clipboard after an explicit click. You can
+also focus either half and press Ctrl+V / ⌘V to paste an image. Clipboard images
+join the same reorderable/removable upload queue, including when editing.
+If direct clipboard access is denied or unsupported, the picker explains the
+keyboard-paste fallback. Copy the image itself, not merely its URL; supported
+clipboard image types are PNG, JPEG, WebP and GIF. Clipboard contents are never
+read automatically on page load.

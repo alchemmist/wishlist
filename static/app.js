@@ -10,6 +10,7 @@ let zoom, current;
 let composerPhotos = [];
 let composerLinks = [];
 let saveController = null;
+let clipboardBusy = false, composerRevision = 0;
 let draggedPhoto = null;
 let zoomOpening = false, closeZoomWhenReady = false;
 let composerRequestId;
@@ -345,7 +346,7 @@ $('#photo-previews').onpointermove = event => {
 };
 $('#photo-previews').onpointerup = $('#photo-previews').onpointercancel = () => { draggedPhoto = null; };
 function resetComposer() {
-  composerRequestId = null;
+  composerRequestId = null; composerRevision++; $('#photo-input-status').textContent = '';
   form.reset(); delete form.dataset.id; composerLinks = []; renderLinkBadges();
   clearPreview(); form.querySelector('[type=submit]').textContent = 'Add';
   for (const id of ['cancel-edit', 'delete-item']) $('#' + id).hidden = true;
@@ -392,6 +393,7 @@ $('#stop-saving').onclick = () => saveController?.abort();
 addEventListener('beforeunload', event => { if (saveController) { event.preventDefault(); event.returnValue = ''; } });
 form.onsubmit = async event => {
   event.preventDefault(); if (composerBusy) return;
+  if (clipboardBusy) { $('#photo-input-status').textContent = 'Please wait for the clipboard image to finish loading.'; return; }
   if (!commitLinks()) return;
   composerRequestId ||= crypto.randomUUID();
   const body = {request_id: composerRequestId, title: field('title').value, description: field('description').value, price: field('price').value, links: [...composerLinks]};
@@ -529,6 +531,44 @@ field('image').onchange = () => {
   const files = [...field('image').files]; field('image').value = ''; addPhotos(files);
 };
 const photoDrop = $('.photo-field');
+$('#choose-photos').onclick = () => { if (!composerBusy) field('image').click(); };
+const clipboardTypes = {'image/png': 'png', 'image/jpeg': 'jpg', 'image/webp': 'webp', 'image/gif': 'gif'};
+$('#paste-photos').onclick = async () => {
+  if (composerBusy || clipboardBusy) return;
+  const revision = composerRevision;
+  const button = $('#paste-photos');
+  const status = message => { if (revision === composerRevision) $('#photo-input-status').textContent = message; };
+  if (!navigator.clipboard?.read) {
+    status('Press Ctrl+V / ⌘V here to paste an image. Direct clipboard access is unavailable in this browser.'); return;
+  }
+  clipboardBusy = true; button.disabled = true; button.setAttribute('aria-busy', 'true');
+  button.querySelector('.photo-source-label').textContent = 'Reading…'; status('Reading clipboard…');
+  try {
+    const items = await navigator.clipboard.read();
+    const files = [];
+    for (const item of items) {
+      const type = item.types.find(type => clipboardTypes[type]);
+      if (type) files.push(new File([await item.getType(type)], 'clipboard-' + Date.now() + '-' + files.length + '.' + clipboardTypes[type], {type}));
+    }
+    if (revision !== composerRevision) return;
+    if (!files.length) { status('No image in the clipboard. Copy an image and try again.'); return; }
+    addPhotos(files); status(files.length === 1 ? 'Image added from clipboard.' : files.length + ' images added from clipboard.');
+  } catch {
+    status('Clipboard access was denied or unavailable. Press Ctrl+V / ⌘V here to paste an image.');
+  } finally {
+    clipboardBusy = false; button.disabled = composerBusy; button.removeAttribute('aria-busy');
+    button.querySelector('.photo-source-label').textContent = 'Paste';
+  }
+};
+photoDrop.addEventListener('paste', event => {
+  if (composerBusy || clipboardBusy) return;
+  const data = event.clipboardData;
+  const incoming = data?.files?.length ? [...data.files] : [...(data?.items || [])].filter(item => item.kind === 'file').map(item => item.getAsFile()).filter(Boolean);
+  const files = incoming.filter(file => clipboardTypes[file.type]);
+  if (!files.length) { $('#photo-input-status').textContent = 'No image in the clipboard. Copy an image and try again.'; return; }
+  event.preventDefault(); addPhotos(files);
+  $('#photo-input-status').textContent = files.length === 1 ? 'Image pasted.' : files.length + ' images pasted.';
+});
 photoDrop.ondragover = event => { event.preventDefault(); if (!composerBusy) photoDrop.classList.add('is-dragover'); };
 photoDrop.ondragleave = () => photoDrop.classList.remove('is-dragover');
 photoDrop.ondrop = event => { event.preventDefault(); photoDrop.classList.remove('is-dragover'); addPhotos([...event.dataTransfer.files]); };
