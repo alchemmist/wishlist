@@ -36,7 +36,7 @@ class Store:
                 endpoint_url=endpoint,
                 aws_access_key_id=access,
                 aws_secret_access_key=secret,
-                config=Config(signature_version="s3v4", s3={"addressing_style": "path"}, connect_timeout=5, read_timeout=15, retries={"max_attempts": 2, "mode": "standard"}),
+                config=Config(signature_version="s3v4", s3={"addressing_style": "path"}, connect_timeout=5, read_timeout=15, max_pool_connections=64, retries={"max_attempts": 2, "mode": "standard"}),
             )
             # Bucket provisioning belongs to infrastructure, not app startup.
 
@@ -87,11 +87,11 @@ class Store:
             with operation("s3.put") as span:
                 span.set_attribute("storage.upload.bytes", size)
                 if size < 8 * 1024 * 1024:
-                    self.client.put_object(Bucket=self.bucket, Key=key, Body=stream.read(), ContentType=content_type)
+                    self.client.put_object(Bucket=self.bucket, Key=key, Body=stream, ContentType=content_type)
                 else:
                     from boto3.s3.transfer import TransferConfig
                     self.client.upload_fileobj(stream, self.bucket, key, ExtraArgs={"ContentType": content_type},
-                                               Config=TransferConfig(use_threads=False))
+                                               Config=TransferConfig(use_threads=False, multipart_chunksize=5 * 1024 * 1024))
         else:
             root = (self.data_dir / "media").resolve()
             path = (root / key).resolve()

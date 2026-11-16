@@ -231,7 +231,12 @@ def test_s3_put_validated_image(tmp_path):
     storage = Store(tmp_path, 'https://s3.invalid', 'wishlist', 'test', 'test', '')
     data = image_bytes()
     with Stubber(storage.client) as stub:
-        stub.add_response('put_object', {}, {'Bucket': 'wishlist', 'Key': ANY, 'Body': data, 'ContentType': 'image/png'})
+        stub.add_response('put_object', {}, {'Bucket': 'wishlist', 'Key': ANY, 'Body': ANY, 'ContentType': 'image/png'})
+        def verify_stream(params, **kwargs):
+            assert not isinstance(params['Body'], bytes)
+            assert params['Body'].read() == data
+            params['Body'].seek(0)
+        storage.client.meta.events.register('before-parameter-build.s3.PutObject', verify_stream)
         key = storage.put('1', data, 'image/png')
         assert key.startswith('1/') and key.endswith('.png')
         stub.assert_no_pending_responses()
