@@ -162,3 +162,22 @@ body[data-hc-zoom-active] .medium-zoom-overlay{z-index:1000}
 #photo-input-status{margin:6px 0 0;font:10px/1.5 'Courier New',monospace;color:#666;overflow-wrap:anywhere}
 #photo-input-status:empty{display:none}
 @media(max-width:480px){#composer .photo-source{font-size:10px;gap:4px;padding:3px}.photo-source svg{width:15px;height:15px}.photo-source .photo-plus{font-size:20px}}
+
+/* A floating activity island; never takes a row or scrolls the editor. */
+#save-progress{position:fixed;z-index:30;left:12px;top:50%;width:min(285px,calc(100vw - 24px));margin:0;box-sizing:border-box;transform:translate(-115%,-50%) scale(.96);opacity:0;transition:transform .32s cubic-bezier(.2,.8,.2,1),opacity .25s ease;background:#fcfcfcf5;backdrop-filter:blur(16px);border:1px solid #dedede;border-radius:18px;padding:15px 17px;box-shadow:0 6px 28px #00000012}
+#save-progress[data-open]{transform:translate(0,-50%) scale(1);opacity:1}
+#save-progress .save-progress-heading{font:12px/1.45 'Courier New',monospace;min-height:24px}
+.save-check{display:none;width:24px;height:24px;flex:none;stroke:#477653;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.save-check path{stroke-dasharray:24;stroke-dashoffset:24}
+#save-progress[data-state=success]{width:125px}
+#save-progress[data-state=success] .save-spinner,#save-progress[data-state=success] #save-meter,#save-progress[data-state=success] #save-detail,#save-progress[data-state=success] .save-progress-actions{display:none}
+#save-progress[data-state=success] .save-check{display:block}
+#save-progress[data-state=success] .save-check path{animation:save-check .3s ease forwards}
+@keyframes save-check{to{stroke-dashoffset:0}}
+@media(prefers-reduced-motion:reduce){#save-progress{transition:none}.save-check path{animation:none!important;stroke-dashoffset:0}}
+
+#save-progress #notice{margin:6px 0 0;font:11px/1.5 'Courier New',monospace;color:#a33}
+#save-progress #notice:empty{display:none}
+#dismiss-progress{position:absolute;right:7px;top:5px;border:0;background:transparent;padding:2px 5px;font:18px/1 monospace;color:#777}
+#save-progress{pointer-events:none}
+#save-progress button{pointer-events:auto}

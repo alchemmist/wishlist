@@ -4,7 +4,8 @@ import os
 import secrets
 import sqlite3
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Literal
+from contextlib import asynccontextmanager
 from uuid import UUID, uuid4
 from urllib.parse import urlsplit, quote
 
@@ -16,6 +17,7 @@ from pydantic import BaseModel, Field, StringConstraints
 from starlette.concurrency import run_in_threadpool
 from starlette.background import BackgroundTask
 
+from app.telemetry import RequestTelemetry, start_metrics, PROVIDER, ingest_browser, accept_browser_batch, operation, measured, TRACER, OPERATIONS
 from app.db import connect, guest
 from app.storage import Store
 from app.middleware import RequestBodyLimitMiddleware
@@ -36,8 +38,21 @@ if not SESSION_SECRET:
         raise RuntimeError("SESSION_SECRET must be set for an HTTPS deployment")
     SESSION_SECRET = secrets.token_hex(32)
 
-app = FastAPI()
 DATABASE_PATH = DATA / "wishlist.sqlite"
+
+@asynccontextmanager
+async def lifespan(app):
+    logging.getLogger("uvicorn.access").disabled = True  # Sanitized, trace-correlated summaries replace raw URL/query logs.
+    metrics = start_metrics(DATABASE_PATH)
+    try:
+        yield
+    finally:
+        if metrics:
+            await run_in_threadpool(metrics[0].shutdown)
+            metrics[0].server_close()
+        await run_in_threadpool(PROVIDER.force_flush, 1000)
+
+app = FastAPI(lifespan=lifespan)
 # Initialize/migrate once, not on every request. Routes use isolated connections.
 db = connect(DATABASE_PATH)
 
@@ -218,9 +233,10 @@ async def login(request: Request):
     if not (ISSUER and CLIENT_ID and CLIENT_SECRET):
         raise HTTPException(503, "Sign-in is not configured")
     try:
-        return await oauth.authentik.authorize_redirect(request, f"{PUBLIC_URL}/login/callback")
-    except (httpx.HTTPError, OAuthError, ValueError, KeyError):
-        logger.exception("Could not start OIDC login")
+        with operation("auth.redirect"):
+            return await oauth.authentik.authorize_redirect(request, f"{PUBLIC_URL}/login/callback")
+    except (httpx.HTTPError, OAuthError, ValueError, KeyError) as exc:
+        logger.warning("Could not start OIDC login error_type=%s", type(exc).__name__)
         raise HTTPException(502, "Sign-in provider is unavailable. Please try again.")
 
 
@@ -230,12 +246,14 @@ async def callback(request: Request, db=Depends(get_db)):
         raise HTTPException(503, "Sign-in is not configured")
     try:
         # Authlib checks state, PKCE, nonce, issuer, audience, expiry and JWT signature.
-        token = await oauth.authentik.authorize_access_token(request)
+        with operation("auth.token_exchange"):
+            token = await oauth.authentik.authorize_access_token(request)
         identity = token.get("userinfo")
         if not identity or not identity.get("sub"):
             raise ValueError("Missing verified ID token")
         metadata = await oauth.authentik.load_server_metadata()
-        info = await oauth.authentik.get(metadata["userinfo_endpoint"], token=token)
+        with operation("auth.userinfo"):
+            info = await oauth.authentik.get(metadata["userinfo_endpoint"], token=token)
         info.raise_for_status()
         info = info.json()
         if not isinstance(info, dict):
@@ -325,6 +343,7 @@ def add_item(username: str, body: ItemIn, request: Request, db=Depends(get_db)):
 
 
 @app.patch("/api/items/{item_id}")
+@measured("item.update")
 def edit_item(item_id: int, body: ItemIn, request: Request, db=Depends(get_db)):
     db.execute("BEGIN IMMEDIATE")
     row = db.execute("SELECT items.*, users.username FROM items JOIN users ON users.id = items.owner_id WHERE items.id = ?", (item_id,)).fetchone()
@@ -464,6 +483,7 @@ def add_photo(item_id: int, photo_id: UUID, request: Request, file: UploadFile =
 
 
 @app.patch("/api/items/{item_id}/images")
+@measured("gallery.update")
 def save_photos(item_id: int, body: PhotoOrder, request: Request, db=Depends(get_db)):
     db.execute("BEGIN IMMEDIATE")
     photo_owner(item_id, request, db)
@@ -539,11 +559,12 @@ def media(key: str):
     if body is None:
         raise HTTPException(404)
     def chunks():
+        span = TRACER.start_span("media.stream")
         try:
             while chunk := body.read(64 * 1024):
                 yield chunk
         finally:
-            body.close()
+            body.close(); span.end()
     return StreamingResponse(chunks(), background=BackgroundTask(body.close), media_type=store.content_type(key), headers={"X-Content-Type-Options": "nosniff", "Cache-Control": "public, max-age=86400"})
 
 
@@ -563,3 +584,31 @@ def page(username: str):
 
 
 app.mount("/static", StaticFiles(directory=ROOT / "static"), name="static")
+
+
+class BrowserSpan(BaseModel):
+    model_config = {"extra": "forbid"}
+    name: Literal['browser.save','browser.fetch','browser.upload','browser.render','browser.page','browser.resource']
+    trace_id: str = Field(pattern=r'^[0-9a-f]{32}$')
+    span_id: str = Field(pattern=r'^[0-9a-f]{16}$')
+    parent_id: str | None = Field(default=None, pattern=r'^[0-9a-f]{16}$')
+    link_trace_id: str | None = Field(default=None, pattern=r'^[0-9a-f]{32}$')
+    link_span_id: str | None = Field(default=None, pattern=r'^[0-9a-f]{16}$')
+    start_ms: float = Field(ge=0, allow_inf_nan=False)
+    end_ms: float = Field(ge=0, allow_inf_nan=False)
+    route: Literal['/','/{username}','/api/me','/api/wishlists/{username}','/api/wishlists/{username}/items','/api/items/{item_id}','/api/items/{item_id}/images','/api/items/{item_id}/images/{photo_id}','/api/items/{item_id}/reserve','/api/items/{item_id}/release','/media/{key}','/static/{path}','/other'] = '/other'
+    method: Literal['GET','POST','PUT','PATCH','DELETE','HEAD','OTHER'] = 'OTHER'
+    status: int = Field(default=0, ge=0, le=599)
+    error: bool = False
+
+class BrowserBatch(BaseModel):
+    model_config = {"extra": "forbid"}
+    spans: list[BrowserSpan] = Field(max_length=32)
+
+@app.post('/api/telemetry/traces', status_code=204)
+def browser_traces(body: BrowserBatch):
+    if not accept_browser_batch(): raise HTTPException(429, 'Telemetry budget exceeded')
+    ingest_browser(body.spans)
+    return Response(status_code=204)
+
+app.add_middleware(RequestTelemetry)

@@ -10,6 +10,7 @@ import boto3
 from botocore.client import Config
 from botocore.exceptions import ClientError
 from PIL import Image, UnidentifiedImageError
+from app.telemetry import measured, operation
 
 Image.MAX_IMAGE_PIXELS = None
 logger = logging.getLogger(__name__)
@@ -36,21 +37,23 @@ class Store:
     def put(self, username: str, data: bytes, content_type: str) -> str:
         return self.put_file(username, io.BytesIO(data), content_type)
 
+    @measured("storage.put")
     def put_file(self, username: str, stream, content_type: str) -> str:
         """Validate a spooled file and transfer without buffering the full photo in RAM."""
         suffix, content_type = _image_type(content_type)
-        try:
-            stream.seek(0)
-            if content_type == "image/webp":
-                _verify_webp(stream)
-            else:
-                with Image.open(stream) as image:
-                    if Image.MIME.get(image.format) != content_type:
-                        raise ValueError("Choose a valid JPEG, PNG, WebP or GIF image")
-                    # Verify the container without decoding an unbounded pixel array.
-                    image.verify()
-        except (UnidentifiedImageError, OSError, SyntaxError) as exc:
-            raise ValueError("Choose a valid JPEG, PNG, WebP or GIF image") from exc
+        with operation("image.validate"):
+            try:
+                stream.seek(0)
+                if content_type == "image/webp":
+                    _verify_webp(stream)
+                else:
+                    with Image.open(stream) as image:
+                        if Image.MIME.get(image.format) != content_type:
+                            raise ValueError("Choose a valid JPEG, PNG, WebP or GIF image")
+                        # Verify the container without decoding an unbounded pixel array.
+                        image.verify()
+            except (UnidentifiedImageError, OSError, SyntaxError) as exc:
+                raise ValueError("Choose a valid JPEG, PNG, WebP or GIF image") from exc
         if content_type not in {"image/jpeg", "image/png", "image/webp", "image/gif"}:
             raise ValueError("Choose a JPEG, PNG, WebP or GIF image")
         stream.seek(0, 2)
@@ -60,12 +63,14 @@ class Store:
         if not self._safe_key(key):
             raise ValueError("Invalid image owner")
         if self.client:
-            if size < 8 * 1024 * 1024:
-                self.client.put_object(Bucket=self.bucket, Key=key, Body=stream.read(), ContentType=content_type)
-            else:
-                from boto3.s3.transfer import TransferConfig
-                self.client.upload_fileobj(stream, self.bucket, key, ExtraArgs={"ContentType": content_type},
-                                           Config=TransferConfig(use_threads=False))
+            with operation("s3.put") as span:
+                span.set_attribute("storage.upload.bytes", size)
+                if size < 8 * 1024 * 1024:
+                    self.client.put_object(Bucket=self.bucket, Key=key, Body=stream.read(), ContentType=content_type)
+                else:
+                    from boto3.s3.transfer import TransferConfig
+                    self.client.upload_fileobj(stream, self.bucket, key, ExtraArgs={"ContentType": content_type},
+                                               Config=TransferConfig(use_threads=False))
         else:
             root = (self.data_dir / "media").resolve()
             path = (root / key).resolve()
@@ -87,6 +92,7 @@ class Store:
             return f"{self.public_base}/{quote(key, safe='/')}"
         return f"/media/{quote(key, safe='/')}"
 
+    @measured("storage.open")
     def open(self, key: str):
         if not self._safe_key(key):
             return None
@@ -119,6 +125,7 @@ class Store:
                 and not any(ord(char) < 32 or ord(char) == 127 for char in key)
                 and all(part not in {"", ".", ".."} for part in key.split("/")))
 
+    @measured("storage.delete")
     def delete(self, key: str) -> None:
         if not self._safe_key(key):
             return
@@ -130,9 +137,9 @@ class Store:
                 path = (root / key).resolve()
                 if path.is_relative_to(root):
                     path.unlink(missing_ok=True)
-        except Exception:
+        except Exception as exc:
             # A cleanup failure must not turn a successful save into a retry/duplicate.
-            logger.exception("Could not delete obsolete image %s", key)
+            logger.warning("Photo cleanup failed error_type=%s", type(exc).__name__)
 
     def content_type(self, key: str) -> str:
         suffix = Path(key).suffix.lower()

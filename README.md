@@ -111,7 +111,7 @@ focus outlines stay within that edge. Upload limits are still enforced without
 permanent explanatory text in the editor.
 
 
-Saving shows a visible status panel above the editor: current stage, transfer
+Saving shows a floating activity island at the left edge, vertically centered: current stage, transfer
 progress/bytes, completed photo count, elapsed time, and thumbnail states. Up to
 three files transfer concurrently (a concurrency bound, not a photo-count cap).
 Stop saving aborts outstanding browser requests without discarding selected
@@ -131,3 +131,15 @@ If direct clipboard access is denied or unsupported, the picker explains the
 keyboard-paste fallback. Copy the image itself, not merely its URL; supported
 clipboard image types are PNG, JPEG, WebP and GIF. Clipboard contents are never
 read automatically on page load.
+
+
+Metadata-only edits make one PATCH request: unchanged photos are not uploaded,
+reordered or deleted, and the list/account are not reloaded. The saved card is
+updated from the server response. Success uses an animated checkmark and fade-out,
+not a permanent “Gift updated” banner. Reduced-motion users get static feedback.
+
+## Observability
+
+See `OBSERVABILITY.md` for tracing, privacy, private metrics and deployment. The
+production chart, dedicated renewable client certificate, Collector job and
+Grafana dashboard are maintained in the sibling Homelab repository.

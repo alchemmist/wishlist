@@ -1,15 +1,17 @@
 import sqlite3
 import unicodedata
 from pathlib import Path
+from app.telemetry import TracedConnection, measured
 
 
 def normalize(value: str) -> str:
     return unicodedata.normalize("NFKC", value).casefold()
 
 
+@measured("db.connect")
 def connect(path: Path, initialize: bool = True) -> sqlite3.Connection:
     path.parent.mkdir(parents=True, exist_ok=True)
-    db = sqlite3.connect(path, check_same_thread=False)
+    db = sqlite3.connect(path, check_same_thread=False, factory=TracedConnection)
     db.row_factory = sqlite3.Row
     db.create_collation("UNICODE_NOCASE", lambda a, b: (normalize(a) > normalize(b)) - (normalize(a) < normalize(b)))
     db.execute("PRAGMA busy_timeout = 5000")

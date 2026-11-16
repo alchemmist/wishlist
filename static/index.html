@@ -4,14 +4,13 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Wishlist</title>
-<link rel="stylesheet" href="/static/style.css?v=clipboard-halves2">
-<script src="/static/app.js?v=clipboard-halves2" type="module"></script>
+<link rel="stylesheet" href="/static/style.css?v=telemetry-island1">
+<script src="/static/app.js?v=telemetry-island1" type="module"></script>
 </head>
 <body>
 <main>
   <h1>Wishlist</h1>
   <p id="owner-name" class="owner-name"></p>
-  <p id="notice" role="status" aria-live="polite"></p>
   <form id="composer" aria-label="Gift editor" hidden>
     <div class="composer-media">
       <div class="photo-field" role="group" aria-label="Add photos">
@@ -33,10 +32,12 @@
       <div class="composer-links"><div id="link-badges" aria-label="Added links"></div><input aria-label="Link" name="links" placeholder="Link" autocomplete="off" type="text"></div>
     </div>
     <div class="composer-actions"><button type="submit">Add</button><button id="cancel-edit" type="button" hidden>Cancel</button><button id="delete-item" class="danger" type="button" hidden>Delete gift</button></div>
-    <div id="save-progress" hidden>
-      <div class="save-progress-heading"><span class="save-spinner" aria-hidden="true"></span><span id="save-status" role="status" aria-live="polite"></span></div>
+    <div id="save-progress" aria-label="Saving progress" hidden>
+      <div class="save-progress-heading"><span class="save-spinner" aria-hidden="true"></span><svg class="save-check" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="m5 12 4 4 10-10"/></svg><span id="save-status" role="status" aria-live="polite"></span></div>
       <progress id="save-meter" max="100" aria-label="Photo upload progress"></progress>
       <p id="save-detail"></p>
+      <p id="notice" role="alert"></p>
+      <button id="dismiss-progress" type="button" aria-label="Dismiss notification" hidden>×</button>
       <div class="save-progress-actions"><span id="save-elapsed"></span><button id="stop-saving" type="button">Stop saving</button></div>
     </div>
     <p id="composer-error" role="alert"></p>

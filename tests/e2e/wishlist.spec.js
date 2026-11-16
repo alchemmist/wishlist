@@ -629,7 +629,7 @@ test('editing many photos has visible progress and elapsed time; over 20 photos 
   await expect(page.getByRole('button', {name: 'Stop saving', exact: true})).toBeEnabled();
   release();
   await expect(page.locator('#save-progress')).toBeHidden({timeout: 20000});
-  await expect(page.locator('#notice')).toContainText('Gift updated');
+  await expect(page.locator('#notice')).toBeEmpty();
   await expect(page.locator('#composer [type=submit]')).toBeEnabled();
   const items = (await (await page.request.get('/api/wishlists/' + username)).json()).items;
   expect(items).toHaveLength(1); expect(items[0].photos).toHaveLength(27);
@@ -726,4 +726,48 @@ test('clipboard completion after Cancel does not add photos to a different draft
   await expect(page.locator('#paste-photos')).toBeEnabled();
   await expect(page.locator('.photo-tile')).toHaveCount(0);
   await expect(page.getByRole('textbox', {name: 'Title', exact: true})).toHaveValue('');
+});
+
+test('title-only edit with 13 photos sends one PATCH, no gallery writes or reload, and uses a floating success island', async ({page}) => {
+  const username = await signIn(page);
+  await page.getByRole('textbox', {name: 'Title', exact: true}).fill('Thirteen photos');
+  await page.getByLabel('Photo', {exact: true}).setInputFiles(Array.from({length:13}, (_, i) => ({...photo, name: 'photo-' + i + '.webp'})));
+  await page.getByRole('button', {name: 'Add', exact: true}).click();
+  await expect(page.locator('.gift')).toHaveCount(1);
+  await page.getByRole('button', {name: 'Edit Thirteen photos', exact: true}).click();
+  const requests = []; page.on('request', request => { if (request.url().includes('/api/') && !request.url().includes('/telemetry/')) requests.push({url: new URL(request.url()).pathname, method: request.method()}); });
+  let release; const gate = new Promise(resolve => { release = resolve; });
+  await page.route('**/api/items/*', async route => { if (route.request().method() === 'PATCH') await gate; await route.continue(); });
+  await page.getByRole('textbox', {name: 'Title', exact: true}).fill('Only title changed');
+  await page.getByRole('button', {name: 'Save', exact: true}).click();
+  await expect(page.locator('#save-progress')).toHaveCSS('position', 'fixed');
+  const island = await page.locator('#save-progress').boundingBox(); const viewport = page.viewportSize();
+  expect(island.y + island.height / 2).toBeCloseTo(viewport.height / 2, 0);
+  await expect(page.locator('#save-status')).not.toContainText('gallery');
+  release();
+  await expect(page.locator('#save-progress')).toHaveAttribute('data-state', 'success');
+  await expect(page.locator('.save-check')).toBeVisible();
+  await expect(page.locator('#save-progress')).toBeHidden();
+  await expect(page.locator('.gift')).toHaveCount(1);
+  await expect(page.getByRole('button', {name: 'Edit Only title changed', exact: true})).toBeVisible();
+  expect(requests).toHaveLength(1); expect(requests[0].method).toBe('PATCH'); expect(requests[0].url).not.toContain('/images');
+  await expect(page.locator('#notice')).toBeEmpty();
+  const item = (await (await page.request.get('/api/wishlists/' + username)).json()).items[0]; expect(item.photos).toHaveLength(13);
+});
+
+test('browser telemetry propagates traceparent and exports only allowlisted content-free spans', async ({page}) => {
+  await signIn(page);
+  const batches = [];
+  await page.route('**/api/telemetry/traces', async route => { batches.push(route.request().postDataJSON()); await route.continue(); });
+  let traceparent;
+  page.on('request', request => { if (request.method() === 'POST' && /\/api\/wishlists\/[^/]+\/items$/.test(new URL(request.url()).pathname)) traceparent = request.headers()['traceparent']; });
+  await addGift(page, 'PRIVATE-TITLE-MUST-NOT-BE-TRACED', true);
+  await expect.poll(() => batches.flatMap(batch => batch.spans).some(span => span.name === 'browser.save')).toBe(true);
+  expect(traceparent).toMatch(/^00-[0-9a-f]{32}-[0-9a-f]{16}-01$/);
+  const data = JSON.stringify(batches);
+  expect(data).not.toContain('PRIVATE-TITLE'); expect(data).not.toContain('clipboard-'); expect(data).not.toContain('test.webp');
+  const spans = batches.flatMap(batch => batch.spans);
+  const save = spans.find(span => span.name === 'browser.save');
+  expect(spans.some(span => span.name === 'browser.fetch' && span.parent_id === save.span_id)).toBe(true);
+  expect(spans.some(span => span.name === 'browser.upload' && span.trace_id === save.trace_id)).toBe(true);
 });

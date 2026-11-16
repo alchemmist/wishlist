@@ -8,8 +8,8 @@
 
 ### Последний результат проверок
 
-- **66 pytest-проверок**: 58 проверок приложения (API, права, конкурентные запросы, валидация, миграции, локальные изображения и S3-контракт) и 8 регрессионных проверок quality/deploy-пайплайна.
-- **140 E2E-проверок**: 35 сценариев × Chromium desktop, Firefox desktop, Chromium/Pixel 7 и WebKit/iPhone 13. Мобильные устройства эмулируются, это не физические телефоны.
+- **71 pytest-проверка**: 63 проверки приложения (API, права, конкурентные запросы, валидация, миграции, локальные изображения и S3-контракт) и 8 регрессионных проверок quality/deploy-пайплайна.
+- **148 E2E-проверок**: 37 сценариев × Chromium desktop, Firefox desktop, Chromium/Pixel 7 и WebKit/iPhone 13. Мобильные устройства эмулируются, это не физические телефоны.
 - Дополнительный повторный прогон: **168/168 passed**, без автоматических retries (до последнего конфигурационного теста S3; сценарии приложения те же).
 - Прогоны выполнены также на **Python 3.13**, используемом Dockerfile/CI, в отдельном окружении.
 - `pip-audit -r requirements.txt`: известных уязвимостей не найдено после обновления зависимостей.
@@ -191,3 +191,30 @@ Photo picker разделён на Files / Paste. Clipboard API вызывает
 редактируемой карточки игнорируется. E2E во всех профилях используют изолированный
 clipboard API fixture и paste-event payload (не персональный системный буфер),
 проверяют сохранение, отказ/пустой буфер, fallback и поздний результат.
+
+
+## Metadata-only saves, floating activity and observability
+
+Тайтл-only Save больше не запускает два PATCH галереи и загрузку списка/аккаунта:
+один PATCH метаданных, карточка обновляется локально из ответа. Порядок сохраняется
+только при изменении; новые upload по-прежнему согласуются по UUID после ошибок.
+Успешные Gift added/updated/deleted убраны. Progress — fixed island слева по центру,
+без сдвига/скролла редактора, с анимированной галочкой/скрытием, Stop и dismiss
+ошибки. Декоративная часть не перехватывает действия с карточками под ней.
+
+OTel SDK с verified mTLS, bounded batch queue; spans запросов (включая чтение
+multipart), SQLite connect/execute/commit, валидации, storage.put/open/delete,
+S3 transfer, media stream и OIDC. SQL, параметры, identity, filenames, URL/query,
+тексты подарков, тела и исключения не экспортируются. Браузер пишет отдельный
+trace на Save, fetch/XHR передают traceparent; browser.resource + Server-Timing
+link связывают native image transfer с сервером без изменения URL/cache key.
+Browser relay не raw OTLP proxy: allowlisted модель, максимум 32 spans, rate budget,
+стандартный лимит body, same-origin защита. Метрики — приватный порт 8001, не ingress.
+Homelab: dedicated renewable Wishlist leaf, existing Collector/sampler, dashboard.
+Долгие trace могут иметь поздние spans после существующего 30s tail decision;
+это не полный CPU profiler/аудит и не обещание 100% retention.
+
+Read-only production snapshot перед rollout: SQLite SELECT ~1ms, S3 HEAD ~602ms
+на первом соединении / ~99–103ms на прогретом. Это не bandwidth benchmark и не
+доказательство причины долгого upload. Сетевой путь socrat-5 → RustFS socrat-0
+не менялся. Новая телеметрия нужна для анализа actual передачи, S3 и commit.
