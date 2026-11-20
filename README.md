@@ -1,6 +1,8 @@
 # Wishlist
 
 Public wishlists on https://wishlist.alchemmist.xyz. How the pieces fit together is in [OVERVIEW.md](OVERVIEW.md).
+Persistent project context and agent instructions: [AGENTS.md](AGENTS.md) and
+[llm-wiki](llm-wiki/README.md).
 
 A signed-in person has one list at `/{username}`. The username comes from Authentik. Anyone can open that page and reserve a gift with a name. Names are unique: the same spelling, ignoring case, is one person. Releasing a gift requires that same name. Signed-in users reserve and release
 with a single toggle click, using their Authentik username automatically; only
@@ -11,7 +13,8 @@ Sign-in is Authentik OIDC. External accounts should be allowed by the Authentik 
 
 Pictures go to the RustFS bucket `wishlist` when `S3_ENDPOINT`, `S3_ACCESS_KEY` and `S3_SECRET_KEY` are set. Without them they stay on the SQLite volume under `/data/media`.
 
-SQLite lives on a single-node volume. The pod is pinned to `socrat-0` for that reason.
+SQLite lives on a single-node volume. The production pod was last verified on `socrat-5` with PVC `wishlist-socrat5`.
+The owning Homelab chart/production values are authoritative for placement.
 
 ## Local development
 
@@ -54,7 +57,7 @@ WAL.
 
 ## CI: Quality Graph
 
-[`qg.yaml`](qg.yaml) is the source of truth for all eleven quality jobs:
+[`qg.yaml`](qg.yaml) is the source of truth for all twelve quality jobs:
 graph/workflow validation, Python/JavaScript syntax, the full pytest suite,
 Python/npm dependency audits and four browser E2E profiles. Quality Graph 0.2.0
 requires the filename `qg.yaml`, not `qg.yml`.
@@ -107,8 +110,8 @@ left, the input clears and shrinks to leave room for the badges. Click a badge
 to edit its URL, press Delete on a focused badge to remove it, or Backspace in
 an empty input to edit the last URL. Add/Save includes a valid pending URL too.
 Photo, title and action controls share the same top edge on desktop and mobile;
-focus outlines stay within that edge. Upload limits are still enforced without
-permanent explanatory text in the editor.
+focus outlines stay within that edge. There are no application-level photo count, byte or pixel caps; actual resource
+capacities still apply.
 
 
 Saving shows a floating activity island at the left edge, vertically centered: current stage, transfer

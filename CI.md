@@ -29,7 +29,7 @@ run GitHub workflows, publish images or deploy the application.
 
 ## Checks and dependencies
 
-All eleven nodes are blocking. Every job checks out without persisted
+All twelve nodes are blocking. Every job checks out without persisted
 credentials, has read-only permissions and receives no deployment secrets.
 Python is 3.13, Node is 24. Browser jobs install only their required engine.
 
